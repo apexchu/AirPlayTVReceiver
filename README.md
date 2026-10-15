@@ -1,70 +1,105 @@
-# AirPlay Receiver for Android
+# AirPlay & DLNA TV Receiver for Android
 
-[![Stars](https://img.shields.io/github/stars/jqssun/android-airplay-server)](https://github.com/jqssun/android-airplay-server)
-[![GitHub](https://img.shields.io/github/downloads/jqssun/android-airplay-server/total?label=GitHub&logo=GitHub)](https://github.com/jqssun/android-airplay-server/releases)
-[![license](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://github.com/jqssun/android-airplay-server/blob/main/LICENSE)
-[![build](https://img.shields.io/github/actions/workflow/status/jqssun/android-airplay-server/apk.yml?label=build)](https://github.com/jqssun/android-airplay-server/actions/workflows/apk.yml)
-[![release](https://img.shields.io/github/v/release/jqssun/android-airplay-server)](https://github.com/jqssun/android-airplay-server/releases)
+[![license](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Android%207.0%2B%20(TV)-green.svg)]()
 
-A fully featured free and open-source implementation of AirPlay for Android that turns your device into an AirPlay-compatible display and speaker, based on [UxPlay](https://github.com/FDH2/UxPlay). It is the first open-source AirPlay 2 receiver for Android and Android TV, and works with iOS/iPadOS, macOS devices as well as other sender implementations.
-
-[<img height="48" alt="Get it on Google Play" src="https://jqssun.github.io/images/badges/google-play-store.svg">](https://play.google.com/store/apps/details?id=io.github.jqssun.airplay)
-[<img height="48" alt="Get it on F-Droid" src="https://jqssun.github.io/images/badges/fdroid.svg">](https://f-droid.org/packages/io.github.jqssun.airplay)
-[<img height="48" alt="Get it on GitHub" src="https://jqssun.github.io/images/badges/github.svg">](https://github.com/jqssun/android-airplay-server/releases/latest)
-
-<video loop src='https://github.com/user-attachments/assets/79ed7c0c-0102-43cc-8816-4f00ce6a4199' alt="demo" width="200" style="display: block; margin: auto;"></video>
-
-## Compatibility
-
-- Android 7.0+, including Android TV
-- AirPlay devices on the same subnet, including iOS/iPadOS, macOS devices, or other sender implementations
-
-## Features
-
-- Screen mirroring with H.264 and H.265 (HEVC) video decoding
-- Audio streaming with AAC-ELD, AAC-LC and ALAC audio decoding
-- Video playback with support for HLS, downloads, and remote controls
-- Music playback with track information, cover art, and remote controls
-- Support for Android TV with directional pad navigation and seeking controls
-- Support for Picture-in-Picture, automatic resolution and mode switching
-- Optional PIN authentication
-- Video resolution, overscan, and frame rate control
-- Audio latency control and support for software decoder fallback
-- Debug overlay with real-time statistics (FPS, bitrate, codec, resolution, frame count, audio volume, etc.)
-- Android native media session integration with notification controls
-
-> [!WARNING]
-> DRM content (e.g. from the Apple TV application) is not supported.
-
-## Implementation
-
-This application uses the C-based [UxPlay](https://github.com/FDH2/UxPlay) library to implement the AirPlay/RAOP protocol, with a JNI bridge to the Android application layer. Audio can be decoded via MediaCodec or a software ALAC decoder, while mirroring video is decoded via MediaCodec and rendered to a SurfaceView. HLS sessions are served through a local playlist proxy.
-
-```mermaid
-flowchart LR
-    AppleDevice["Apple Device (Sender)"]
-    UxPlay["UxPlay (C/JNI)<br/>RAOP + mDNS<br/>FairPlay + HLS"]
-    AndroidApp["Android (Receiver)<br/>MediaCodec + AudioTrack<br/>ExoPlayer (HLS)"]
-
-    AppleDevice -- "RAOP / HLS" --> UxPlay
-    UxPlay --> AndroidApp
-```
-
-CMake is used for native C/C++ components under [`app/src/main/cpp`](app/src/main/cpp). Submodules must be initialized before building. 
-
-```bash
-git submodule update --init --recursive
-./gradlew assembleDebug
-```
-
-Check out the [CI](https://github.com/jqssun/android-airplay-server/blob/main/.github/workflows/apk.yml) for more details on reproducible builds.
-
-## Credits
-
-- [UxPlay](https://github.com/FDH2/UxPlay) for the AirPlay/RAOP server implementation
-- [FFmpeg](https://ffmpeg.org) for the lossless audio decoder
-- [Next Player](https://github.com/anilbeesetti/nextplayer) for the video player
+专为 Android / Android TV 设计的高性能双协议无线投屏接收端，同时支持 **Apple AirPlay**（屏幕镜像 / 音频 / 视频）与 **UPnP / DLNA MediaRenderer**（B 站、腾讯视频、爱奇艺、优酷等 App 内 TV 投屏），双服务独立并行、互不干扰。
 
 ---
 
-Disclaimer: This project is not affiliated with Apple Inc.
+## 🌟 核心特性 (Key Features)
+
+### 1. 双协议并行投屏
+- **AirPlay 2 接收端**：基于 [UxPlay](https://github.com/FDH2/UxPlay) 底层协议库与 JNI 桥接，支持 iPhone、iPad、Mac 的屏幕镜像、视频推送以及高质量音频播放（ALAC / AAC-ELD / AAC-LC）。
+- **UPnP / DLNA MediaRenderer**：集成 Cling UPnP 架构与 AVTransport / RenderingControl 服务，广播 `MediaRenderer` 设备，主流国内音视频 App（哔哩哔哩、腾讯视频、爱奇艺等）秒搜秒投。
+
+### 2. 电视端体验深度优化
+- **开机自启与常驻**：支持 `BOOT_COMPLETED` 开机广播自动拉起界面，遥控器返回键平滑退入后台不销毁，保证渲染 `Surface` 随时就绪。
+- **后台全屏呼叫唤醒（Full-Screen Intent）**：解决 Android 10/11+ 后台 Activity 启动拦截机制，即便在电视桌面或其他应用中，一旦收到投屏信号立刻自动弹到前台全屏播映。
+- **电视遥控器交互适配**：支持 D-Pad 方向键控制、自动全屏、屏幕常亮保活与简洁无干扰 UI。
+- **高性能硬件解码**：支持 H.264 与 H.265 (HEVC) 硬件实时解码与自适应帧率控制，低延迟低抖动。
+
+---
+
+## 📐 系统架构 (Architecture)
+
+```mermaid
+flowchart TD
+    subgraph Senders["发送端 (Senders)"]
+        Apple["iOS / iPadOS / macOS<br/>(AirPlay / 屏幕镜像)"]
+        DlnaApp["国内视频 App (B站 / 腾讯视频等)<br/>(UPnP / DLNA)"]
+    end
+
+    subgraph TV["Android TV 接收端 (AirPlayTVReceiver)"]
+        subgraph Discovery["服务发现"]
+            mDNS["mDNS (_airplay._tcp / _raop._tcp)"]
+            SSDP["SSDP (upnp:rootdevice / MediaRenderer)"]
+        end
+
+        subgraph Engines["核心引擎 (Core Engines)"]
+            UxPlay["UxPlay C/JNI 引擎<br/>(RAOP / FairPlay / 镜像解码)"]
+            Cling["Cling UPnP 引擎<br/>(AVTransport / RenderingControl)"]
+        end
+
+        subgraph Playback["播放与渲染 (Playback & UI)"]
+            VideoRenderer["VideoRenderer (MediaCodec + SurfaceView)"]
+            ExoPlayer["ExoPlayer (HLS / MP4 视频直链解码)"]
+            AudioOboe["AudioRenderer (AAudio / Oboe / AudioTrack)"]
+            FullWakeup["Full-Screen Intent<br/>后台全屏自动唤醒机制"]
+        end
+    end
+
+    Apple -->|mDNS| mDNS
+    Apple -->|RAOP / 镜像流| UxPlay
+    DlnaApp -->|SSDP 发现| SSDP
+    DlnaApp -->|SOAP SetAVTransportURI| Cling
+
+    UxPlay --> VideoRenderer
+    UxPlay --> AudioOboe
+    Cling --> ExoPlayer
+    Cling -.-> FullWakeup
+```
+
+---
+
+## 🛠️ 编译与安装 (Build & Install)
+
+本项目基于 Gradle 与 CMake 构建原生 C/C++ 组件。
+
+### 1. 初始化依赖与子模块
+```bash
+git submodule update --init --recursive
+```
+
+### 2. 构建 Debug APK
+```bash
+./gradlew assembleDebug
+```
+
+生成安装包位于：`app/build/outputs/apk/debug/app-debug.apk`。
+
+### 3. 安装到 Android TV 设备 (ADB)
+```bash
+adb connect <TV_IP>:5555
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+---
+
+## 📺 运行环境与兼容性 (Compatibility)
+
+- **Android 系统**：Android 7.0 (API 24) 及以上，完美适配 Android 11+ Google TV。
+- **网络要求**：电视与发送端设备处于同一局域网（同一 Wi-Fi 或交换机），网络需支持多播（Multicast / mDNS）。
+
+---
+
+## 📄 开源许可 (License)
+
+本项目遵循 [GPLv3 许可证](LICENSE)。
+
+## 🙏 致谢 (Credits)
+
+- [UxPlay](https://github.com/FDH2/UxPlay) - AirPlay / RAOP 核心协议实现
+- [Cling](https://github.com/4thline/cling) - UPnP / DLNA 核心协议栈
+- [ExoPlayer / Media3](https://github.com/androidx/media) - 现代化流媒体播放引擎
+- [FFmpeg](https://ffmpeg.org) - 无损音频解码支持
