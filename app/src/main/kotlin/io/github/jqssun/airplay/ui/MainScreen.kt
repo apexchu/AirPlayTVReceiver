@@ -78,7 +78,6 @@ import kotlinx.coroutines.delay
 
 private enum class Tab(val labelRes: Int, val icon: ImageVector) {
     OVERVIEW(R.string.tab_overview, Icons.Default.Cast),
-    LOGS(R.string.tab_logs, Icons.AutoMirrored.Filled.Article),
     SETTINGS(R.string.tab_settings, Icons.Default.Settings)
 }
 
@@ -92,6 +91,7 @@ fun MainScreen(
 ) {
     var tab by remember { mutableStateOf(Tab.OVERVIEW) }
     var fullscreen by remember { mutableStateOf(false) }
+    var showLogs by remember { mutableStateOf(false) }
     val pin by viewModel.pinCode.collectAsState()
     val connections by viewModel.connectionCount.collectAsState()
     val audioOnly by viewModel.audioOnly.collectAsState()
@@ -509,6 +509,9 @@ fun MainScreen(
             onExitFullscreen = { fullscreen = false },
             onPip = onPip
         )
+    } else if (showLogs) {
+        BackHandler { showLogs = false }
+        LogsScreen(viewModel = viewModel, onBack = { showLogs = false })
     } else {
         Scaffold(
             bottomBar = {
@@ -520,12 +523,35 @@ fun MainScreen(
                     )
                     NavigationBar {
                         Tab.entries.forEach { t ->
+                            val isSelected = tab == t
+                            var isFocused by remember { mutableStateOf(false) }
                             NavigationBarItem(
-                                selected = tab == t,
+                                selected = isSelected,
                                 onClick = { tab = t },
-                                icon = { Icon(t.icon, null) },
-                                label = { Text(stringResource(t.labelRes)) },
-                                modifier = Modifier.dpadFocus()
+                                icon = {
+                                    Icon(
+                                        t.icon,
+                                        contentDescription = null,
+                                        tint = if (isSelected || isFocused) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    )
+                                },
+                                label = {
+                                    Text(
+                                        stringResource(t.labelRes),
+                                        fontWeight = if (isSelected || isFocused) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected || isFocused) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    )
+                                },
+                                colors = NavigationBarItemDefaults.colors(
+                                    indicatorColor = Color.Transparent,
+                                    selectedIconColor = MaterialTheme.colorScheme.primary,
+                                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                ),
+                                modifier = Modifier.onFocusChanged { isFocused = it.isFocused }
                             )
                         }
                     }
@@ -535,7 +561,8 @@ fun MainScreen(
             Box(modifier = Modifier.padding(padding)) {
                 TabContent(
                     tab, viewModel, video,
-                    onFullscreen = { fullscreen = true }, onPip = onPip, showAudioMode = audioOnly
+                    onFullscreen = { fullscreen = true }, onPip = onPip, showAudioMode = audioOnly,
+                    onViewLogs = { showLogs = true }
                 )
             }
         }
@@ -569,15 +596,15 @@ private fun TabContent(
     video: @Composable () -> Unit,
     onFullscreen: () -> Unit,
     onPip: () -> Unit,
-    showAudioMode: Boolean
+    showAudioMode: Boolean,
+    onViewLogs: () -> Unit
 ) {
     when (tab) {
         Tab.OVERVIEW -> OverviewContent(
             viewModel, video,
             onFullscreen = onFullscreen, onPip = onPip, showAudioMode = showAudioMode
         )
-        Tab.LOGS -> LogsScreen(viewModel)
-        Tab.SETTINGS -> SettingsScreen(viewModel)
+        Tab.SETTINGS -> SettingsScreen(viewModel, onViewLogs = onViewLogs)
     }
 }
 
@@ -598,153 +625,142 @@ private fun OverviewContent(
     val videoPlaybackActive by viewModel.videoPlaybackActive.collectAsState()
     val debugEnabled by viewModel.debugEnabled.collectAsState()
     val debugInfo by viewModel.debugInfo.collectAsState()
-    val tv = isTv()
-    val startFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) {
-        if (tv) startFocus.requestFocus()
-    }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        // content area
-        Box(
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center
+    ) {
+        // Top-left: Server name + status badge
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(16.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center
+                .align(Alignment.TopStart)
+                .padding(20.dp)
         ) {
-            val connecting = state == ServerState.RUNNING && connections > 0 &&
-                !mirroringActive && !videoPlaybackActive
-            if (showAudioMode && state == ServerState.RUNNING && connections > 0) {
-                NowPlayingContent(viewModel)
-            } else {
-                if (state == ServerState.RUNNING && (mirroringActive || idlePreview)) {
-                    video()
-                }
-                if (state != ServerState.RUNNING || connections == 0) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = if (connections > 0) Icons.Default.CastConnected else Icons.Default.Cast,
-                            contentDescription = null,
-                            modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = serverName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.width(10.dp))
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (state == ServerState.RUNNING) Color(0xFF4CAF50)
+                                    else MaterialTheme.colorScheme.error
+                                )
                         )
-                        Spacer(Modifier.height(12.dp))
+                        Spacer(Modifier.width(8.dp))
                         Text(
-                            text = when (state) {
-                                ServerState.STOPPED -> stringResource(R.string.server_stopped)
-                                ServerState.RUNNING -> stringResource(R.string.waiting_for_connection)
-                                ServerState.ERROR -> stringResource(R.string.error_starting_server)
-                            },
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            text = if (state == ServerState.RUNNING) "服务运行中" else stringResource(R.string.stopped_label),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
-                } else if (connecting) {
+                }
+                if (connections > 0) {
+                    Spacer(Modifier.width(10.dp))
                     Text(
-                        text = stringResource(R.string.waiting_for_playback),
+                        text = stringResource(R.string.connected_count, connections),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
+                }
+            }
+            if (debugEnabled && connections > 0) {
+                Spacer(Modifier.height(8.dp))
+                DebugOverlay(debugInfo)
+            }
+        }
+
+        val connecting = state == ServerState.RUNNING && connections > 0 &&
+            !mirroringActive && !videoPlaybackActive
+        if (showAudioMode && state == ServerState.RUNNING && connections > 0) {
+            NowPlayingContent(viewModel)
+        } else {
+            if (state == ServerState.RUNNING && (mirroringActive || idlePreview)) {
+                video()
+            }
+            if (state != ServerState.RUNNING || connections == 0) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = if (connections > 0) Icons.Default.CastConnected else Icons.Default.Cast,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = when (state) {
+                            ServerState.STOPPED -> stringResource(R.string.server_stopped)
+                            ServerState.RUNNING -> stringResource(R.string.waiting_for_connection)
+                            ServerState.ERROR -> stringResource(R.string.error_starting_server)
+                        },
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )
                 }
-                if (state == ServerState.RUNNING && mirroringActive) {
-                    Row(modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)) {
-                        IconButton(onClick = onPip, modifier = Modifier.dpadFocus()) {
-                            Icon(
-                                painterResource(R.drawable.ic_pip), contentDescription = stringResource(R.string.cd_pip),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                            )
-                        }
-                        IconButton(onClick = onFullscreen, modifier = Modifier.dpadFocus()) {
-                            Icon(
-                                Icons.Default.Fullscreen, contentDescription = stringResource(R.string.cd_fullscreen),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                            )
-                        }
+            } else if (connecting) {
+                Text(
+                    text = stringResource(R.string.waiting_for_playback),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
+            }
+            if (state == ServerState.RUNNING && mirroringActive) {
+                Row(modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)) {
+                    IconButton(onClick = onPip, modifier = Modifier.dpadFocus()) {
+                        Icon(
+                            painterResource(R.drawable.ic_pip), contentDescription = stringResource(R.string.cd_pip),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
                     }
-                }
-            }
-            if (debugEnabled && connections > 0) {
-                DebugOverlay(debugInfo, Modifier.align(Alignment.TopStart).padding(8.dp))
-            }
-            var showRes by remember { mutableStateOf(false) }
-            LaunchedEffect(videoResolution) {
-                if (videoResolution.isNotEmpty() && !showAudioMode) {
-                    showRes = true
-                    delay(5000)
-                    showRes = false
-                }
-            }
-            if (!showAudioMode) {
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = showRes && connections > 0,
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)
-                ) {
-                    Text(
-                        text = videoResolution,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    )
+                    IconButton(onClick = onFullscreen, modifier = Modifier.dpadFocus()) {
+                        Icon(
+                            Icons.Default.Fullscreen, contentDescription = stringResource(R.string.cd_fullscreen),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
+                    }
                 }
             }
         }
 
-        // controls
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = serverName,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        val statusColor by animateColorAsState(
-                            when (state) {
-                                ServerState.RUNNING -> MaterialTheme.colorScheme.primary
-                                ServerState.ERROR -> MaterialTheme.colorScheme.error
-                                ServerState.STOPPED -> MaterialTheme.colorScheme.onSurfaceVariant
-                            }, label = "status"
-                        )
-                        Text(
-                            text = when (state) {
-                                ServerState.RUNNING -> stringResource(R.string.connected_count, connections)
-                                ServerState.ERROR -> stringResource(R.string.error_label)
-                                ServerState.STOPPED -> stringResource(R.string.stopped_label)
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = statusColor
-                        )
-                    }
-
-                    FilledTonalButton(
-                        onClick = {
-                            if (state == ServerState.RUNNING) viewModel.stopServer()
-                            else viewModel.startServer()
-                        },
-                        modifier = Modifier.dpadFocus().focusRequester(startFocus)
-                    ) {
-                        Icon(
-                            imageVector = if (state == ServerState.RUNNING) Icons.Default.Stop else Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(if (state == ServerState.RUNNING) stringResource(R.string.btn_stop) else stringResource(R.string.btn_start))
-                    }
-                }
+        var showRes by remember { mutableStateOf(false) }
+        LaunchedEffect(videoResolution) {
+            if (videoResolution.isNotEmpty() && !showAudioMode) {
+                showRes = true
+                delay(5000)
+                showRes = false
+            }
+        }
+        if (!showAudioMode) {
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showRes && connections > 0,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)
+            ) {
+                Text(
+                    text = videoResolution,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
             }
         }
     }

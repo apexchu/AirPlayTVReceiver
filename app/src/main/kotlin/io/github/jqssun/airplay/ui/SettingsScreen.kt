@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
@@ -34,7 +35,11 @@ import androidx.compose.ui.res.stringResource
 import kotlin.math.roundToInt
 
 @Composable
-fun SettingsScreen(viewModel: MainViewModel) {
+fun SettingsScreen(
+    viewModel: MainViewModel,
+    onViewLogs: () -> Unit = {}
+) {
+    val logsEnabled by viewModel.logsEnabled.collectAsState()
     val serverName by viewModel.serverName.collectAsState()
     val h265Enabled by viewModel.h265Enabled.collectAsState()
     val enforceSdr by viewModel.enforceSdr.collectAsState()
@@ -135,14 +140,13 @@ fun SettingsScreen(viewModel: MainViewModel) {
         ListItem(
             modifier = Modifier
                 .dpadFocus(RectangleShape)
-                .toggleable(
-                    value = launchOnConnect,
-                    role = Role.Switch,
-                    onValueChange = {
-                        viewModel.setLaunchOnConnect(it)
-                        if (it && !canAutoLaunch(ctx)) ctx.startActivity(_overlayIntent(ctx))
+                .clickable {
+                    if (!canAutoLaunch(ctx)) {
+                        ctx.startActivity(_overlayIntent(ctx))
+                    } else {
+                        viewModel.setLaunchOnConnect(!launchOnConnect)
                     }
-                ),
+                },
             headlineContent = { Text(stringResource(R.string.setting_launch_on_connect)) },
             supportingContent = {
                 Text(stringResource(
@@ -151,7 +155,16 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 ))
             },
             trailingContent = {
-                Switch(checked = launchOnConnect, onCheckedChange = null)
+                Switch(
+                    checked = launchOnConnect,
+                    onCheckedChange = {
+                        if (!canAutoLaunch(ctx)) {
+                            ctx.startActivity(_overlayIntent(ctx))
+                        } else {
+                            viewModel.setLaunchOnConnect(it)
+                        }
+                    }
+                )
             }
         )
 
@@ -200,6 +213,31 @@ fun SettingsScreen(viewModel: MainViewModel) {
             description = stringResource(R.string.setting_sw_alac_desc),
             checked = forceSwAlac,
             onCheckedChange = { viewModel.setForceSwAlac(it) }
+        )
+
+        SectionHeader(stringResource(R.string.section_logs))
+
+        SettingSwitch(
+            title = stringResource(R.string.setting_logs_enabled),
+            description = stringResource(R.string.setting_logs_enabled_desc),
+            checked = logsEnabled,
+            onCheckedChange = { viewModel.setLogsEnabled(it) }
+        )
+
+        ListItem(
+            modifier = Modifier
+                .dpadFocus(RectangleShape)
+                .clickable { onViewLogs() },
+            headlineContent = { Text(stringResource(R.string.btn_view_logs)) },
+            supportingContent = { Text(stringResource(R.string.desc_view_logs)) },
+            trailingContent = {
+                FilledTonalButton(
+                    onClick = onViewLogs,
+                    modifier = Modifier.dpadFocus()
+                ) {
+                    Text(stringResource(R.string.btn_open_logs))
+                }
+            }
         )
 
         SectionHeader(stringResource(R.string.section_developer))

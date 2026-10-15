@@ -93,6 +93,19 @@ android {
         compose = true
         prefab = true
     }
+
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/beans.xml"
+            excludes += "META-INF/about.html"
+            excludes += "META-INF/notice.html"
+            excludes += "META-INF/LICENSE*"
+            excludes += "META-INF/NOTICE*"
+            excludes += "META-INF/DEPENDENCIES"
+            excludes += "META-INF/eclipse.inf"
+        }
+    }
 }
 
 tasks.register("applyUxplayPatches") {
@@ -147,4 +160,16 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
+
+    implementation(libs.cling.core) {
+        exclude(group = "org.seamless", module = "seamless-xml")
+    }
+    implementation(libs.cling.support) {
+        exclude(group = "org.seamless", module = "seamless-xml")
+    }
+    implementation(files("libs/seamless-xml-1.1.2-patched.jar"))
+    implementation(libs.jetty.server)
+    implementation(libs.jetty.servlet)
+    implementation(libs.jetty.client)
+    implementation(libs.javax.servlet)
 }

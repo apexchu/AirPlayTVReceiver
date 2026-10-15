@@ -1,6 +1,7 @@
 package io.github.jqssun.airplay
 
 import android.Manifest
+import android.app.NotificationManager
 import android.app.PictureInPictureParams
 import android.content.ComponentName
 import android.content.Intent
@@ -13,6 +14,7 @@ import android.os.IBinder
 import android.util.Rational
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -47,7 +49,7 @@ class MainActivity : ComponentActivity() {
             svc.logCallback = logCallback
             svc.pinCallback = pinCallback
             viewModel.bindService(svc)
-            if (viewModel.autoStart.value && svc.serverState.value == AirPlayService.ServerState.STOPPED) {
+            if (svc.serverState.value == AirPlayService.ServerState.STOPPED) {
                 viewModel.startServer()
             }
         }
@@ -64,6 +66,28 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // 保持屏幕常亮，防止电视待机休眠导致 Surface 被回收
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        // 允许锁屏唤醒并点亮屏幕
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            )
+        }
+
+        // 遥控器返回键：回到桌面而不是退出应用（保证 Surface 常驻）
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                moveTaskToBack(true)
+            }
+        })
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -83,10 +107,8 @@ class MainActivity : ComponentActivity() {
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                combine(viewModel.keepScreenOn, viewModel.connectionCount) { keep, conns ->
-                    keep && conns > 0
-                }.collect { on ->
-                    if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                viewModel.keepScreenOn.collect { keep ->
+                    if (keep) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 }
             }
@@ -148,6 +170,12 @@ class MainActivity : ComponentActivity() {
         isInPip.value = inPip
     }
 
+    override fun onStart() {
+        super.onStart()
+        (getSystemService(NOTIFICATION_SERVICE) as? NotificationManager)
+            ?.cancel(AirPlayService.FSI_NOTIFICATION_ID)
+    }
+
     override fun onStop() {
         super.onStop()
         // never stop mid-session
@@ -155,6 +183,16 @@ class MainActivity : ComponentActivity() {
             viewModel.serverState.value == AirPlayService.ServerState.RUNNING &&
             viewModel.connectionCount.value == 0) {
             viewModel.stopServer()
+        }
+    }
+
+    // 遥控器返回键：回到桌面而不是退出应用（保证 Surface 常驻）
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (onBackPressedDispatcher.hasEnabledCallbacks()) {
+            super.onBackPressed()
+        } else {
+            moveTaskToBack(true)
         }
     }
 

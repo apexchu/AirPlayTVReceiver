@@ -12,6 +12,8 @@ datastore = "1.1.1"
 coroutines = "1.9.0"
 media3 = "1.11.0-beta01"
 oboe = "1.9.3"
+cling = "2.1.2"
+jetty = "8.1.22.v20160922"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "core-ktx" }
@@ -42,6 +44,12 @@ media3-ui-compose-material3 = { group = "androidx.media3", name = "media3-ui-com
 kotlinx-coroutines = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 
 oboe = { group = "com.google.oboe", name = "oboe", version.ref = "oboe" }
+cling-core = { group = "org.fourthline.cling", name = "cling-core", version.ref = "cling" }
+cling-support = { group = "org.fourthline.cling", name = "cling-support", version.ref = "cling" }
+jetty-server = { group = "org.eclipse.jetty", name = "jetty-server", version.ref = "jetty" }
+jetty-servlet = { group = "org.eclipse.jetty", name = "jetty-servlet", version.ref = "jetty" }
+jetty-client = { group = "org.eclipse.jetty", name = "jetty-client", version.ref = "jetty" }
+javax-servlet = { group = "javax.servlet", name = "javax.servlet-api", version = "3.0.1" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

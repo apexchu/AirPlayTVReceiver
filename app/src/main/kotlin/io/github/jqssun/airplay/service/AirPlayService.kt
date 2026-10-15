@@ -48,14 +48,27 @@ import io.github.jqssun.airplay.download.VideoDownloader
 import io.github.jqssun.airplay.renderer.AirPlayVideoPlayer
 import io.github.jqssun.airplay.renderer.AudioRenderer
 import io.github.jqssun.airplay.renderer.VideoRenderer
+import io.github.jqssun.airplay.dlna.CustomAVTransportService
+import io.github.jqssun.airplay.dlna.DlnaUpnpManager
+import org.fourthline.cling.model.ModelUtil
+import org.fourthline.cling.model.types.UnsignedIntegerFourBytes
+import org.fourthline.cling.support.model.MediaInfo
+import org.fourthline.cling.support.model.PositionInfo
+import org.fourthline.cling.support.model.StorageMedium
+import org.fourthline.cling.support.model.TransportInfo
+import org.fourthline.cling.support.model.TransportState
+import org.fourthline.cling.support.model.TransportStatus
 import io.github.jqssun.airplay.viewmodel.DebugInfo
 import java.net.NetworkInterface
 import java.security.SecureRandom
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 data class VideoPlaybackInfo(
@@ -80,6 +93,10 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
     private val audioManager by lazy { getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val airPlayVideoPlayer by lazy { AirPlayVideoPlayer(this) }
     val videoDownloader by lazy { VideoDownloader(this) }
+
+    private var dlnaManager: DlnaUpnpManager? = null
+    private var currentDlnaUri: String? = null
+    private var currentDlnaTitle: String? = null
 
     // hls urls point at the native httpd, valid only while the session lives
     private val _videoLocation = MutableStateFlow<String?>(null)
@@ -126,6 +143,9 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
     // recent /playback-info polls with no playback = pending video; polls start ~1s before /play
     @Volatile private var _lastVideoPollAt = 0L
     @Volatile private var _videoPollSuppressed = false
+    @Volatile private var _isDlnaPlayback = false
+    @Volatile private var _lastDlnaHeartbeatAt = 0L
+    private var _playbackHeartbeatJob: Job? = null
 
     fun videoSessionPending(): Boolean =
         !_videoPlaybackActive.value && !_audioOnly.value && !_mirroringActive.value &&
@@ -203,6 +223,82 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
     override fun onBind(intent: Intent): IBinder {
         super.onBind(intent)
         return LocalBinder()
+    }
+
+    private val dlnaCallback = object : CustomAVTransportService.DlnaPlaybackCallback {
+        override fun onHeartbeat() {
+            _lastDlnaHeartbeatAt = SystemClock.elapsedRealtime()
+        }
+
+        override fun onSetUri(uri: String, title: String?) {
+            currentDlnaUri = uri
+            currentDlnaTitle = title
+            log("DLNA onSetUri: $uri ($title)")
+        }
+
+        override fun onPlay() {
+            val uri = currentDlnaUri ?: return
+            _mainHandler.post {
+                if (_mirroringActive.value) {
+                    videoRenderer.stopSession()
+                    _mirroringActive.value = false
+                }
+                playDlnaVideo(uri, currentDlnaTitle)
+            }
+        }
+
+        override fun onPause() {
+            _mainHandler.post {
+                airPlayVideoPlayer.setRate(0f)
+            }
+        }
+
+        override fun onStop() {
+            _mainHandler.post {
+                stopVideoPlayback()
+            }
+        }
+
+        override fun onSeek(positionMs: Long) {
+            _mainHandler.post {
+                airPlayVideoPlayer.scrub(positionMs / 1000f)
+            }
+        }
+
+        override fun getPositionInfo(): PositionInfo {
+            val posSec = (_videoPlaybackInfo.value.positionMs / 1000).coerceAtLeast(0)
+            val durSec = (_videoPlaybackInfo.value.durationMs / 1000).coerceAtLeast(0)
+            val posStr = ModelUtil.toTimeString(posSec)
+            val durStr = ModelUtil.toTimeString(durSec)
+            return PositionInfo(
+                1,
+                durStr,
+                currentDlnaUri ?: "",
+                posStr,
+                posStr
+            )
+        }
+
+        override fun getMediaInfo(): MediaInfo {
+            val durSec = (_videoPlaybackInfo.value.durationMs / 1000).coerceAtLeast(0)
+            val durStr = ModelUtil.toTimeString(durSec)
+            return MediaInfo(
+                currentDlnaUri ?: "",
+                "",
+                UnsignedIntegerFourBytes(1),
+                durStr,
+                StorageMedium.NETWORK
+            )
+        }
+
+        override fun getTransportInfo(): TransportInfo {
+            val state = if (_videoPlaybackActive.value) {
+                if (_videoPlaybackInfo.value.playing) TransportState.PLAYING else TransportState.PAUSED_PLAYBACK
+            } else {
+                TransportState.STOPPED
+            }
+            return TransportInfo(state, TransportStatus.OK, "1")
+        }
     }
 
     override fun onCreate() {
@@ -435,6 +531,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
             ContextCompat.startForegroundService(this, Intent(this, AirPlayService::class.java))
         }
         promoteToForeground()
+        dlnaManager = DlnaUpnpManager(this, dlnaCallback).apply { start() }
         log("Server started on port $port")
     }
 
@@ -481,6 +578,8 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         nsdManager = null
         wakeLock?.release()
         wakeLock = null
+        dlnaManager?.stop()
+        dlnaManager = null
         _serverState.value = ServerState.ERROR
         if (foregroundStarted) {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -489,6 +588,8 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
     }
 
     fun stopServer() {
+        dlnaManager?.stop()
+        dlnaManager = null
         audioRenderer.detachEngine()
         if (nativeHandle != 0L) {
             NativeBridge.nativeStop(nativeHandle)
@@ -503,6 +604,9 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         videoRenderer.release()
         airPlayVideoPlayer.stop()
         mediaSession?.isActive = false
+        _playbackHeartbeatJob?.cancel()
+        _playbackHeartbeatJob = null
+        _isDlnaPlayback = false
         _audioOnly.value = false
         _videoPlaybackActive.value = false
         _mirroringActive.value = false
@@ -564,18 +668,62 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
 
     fun stopVideoPlayback() = _endVideoPlayback("AirPlay Video stopped (local)")
 
+    fun playDlnaVideo(uri: String, title: String? = null, startPositionSeconds: Float = 0f) {
+        if (shouldLaunchOnConnect()) launchMainActivity()
+        _isDlnaPlayback = true
+        _lastDlnaHeartbeatAt = SystemClock.elapsedRealtime()
+        _videoLocation.value = uri
+        _videoPlaySeq.value++
+        _videoPollSuppressed = false
+        _videoPlaybackInfo.value = VideoPlaybackInfo(positionMs = (startPositionSeconds * 1000).toLong())
+        _videoPlaybackAspect.value = 16f / 9f
+        _videoPlaybackSize.value = null
+        _videoTitle.value = title ?: "DLNA 投屏"
+        _videoPlaybackActive.value = true
+        airPlayVideoPlayer.play(uri, startPositionSeconds)
+        mediaSession?.isActive = true
+        _startPlaybackHeartbeatMonitor()
+        log("DLNA Video play: $uri ($title)")
+    }
+
     fun downloadVideo() {
         _videoLocation.value?.let { videoDownloader.start(it) }
     }
 
     private fun _endVideoPlayback(message: String) {
         if (!_videoPlaybackActive.value) return
+        _playbackHeartbeatJob?.cancel()
+        _playbackHeartbeatJob = null
+        _isDlnaPlayback = false
         // lingering polls after a stop must not bounce the UI back to a pending session
         _videoPollSuppressed = true
         _videoPlaybackActive.value = false
         airPlayVideoPlayer.stop()
         if (!_audioOnly.value) mediaSession?.isActive = false
         log(message)
+    }
+
+    private fun _startPlaybackHeartbeatMonitor() {
+        _playbackHeartbeatJob?.cancel()
+        _playbackHeartbeatJob = lifecycleScope.launch {
+            while (isActive && _videoPlaybackActive.value) {
+                delay(1000L)
+                val now = SystemClock.elapsedRealtime()
+                if (_isDlnaPlayback) {
+                    if (_lastDlnaHeartbeatAt > 0L && now - _lastDlnaHeartbeatAt > DLNA_HEARTBEAT_TIMEOUT_MS) {
+                        log("DLNA client heartbeat timeout (${now - _lastDlnaHeartbeatAt}ms), client app closed -> stopping projection")
+                        _mainHandler.post { stopVideoPlayback() }
+                        break
+                    }
+                } else {
+                    if (_lastVideoPollAt > 0L && now - _lastVideoPollAt > AIRPLAY_POLL_TIMEOUT_MS) {
+                        log("AirPlay video poll timeout (${now - _lastVideoPollAt}ms), client app closed -> stopping projection")
+                        _mainHandler.post { stopVideoPlayback() }
+                        break
+                    }
+                }
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -607,6 +755,9 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
     }
 
     override fun onVideoPlay(location: String, startPositionSeconds: Float) {
+        if (shouldLaunchOnConnect()) launchMainActivity()
+        _isDlnaPlayback = false
+        _lastVideoPollAt = SystemClock.elapsedRealtime()
         _videoLocation.value = location
         _videoPlaySeq.value++
         _videoPollSuppressed = false
@@ -618,6 +769,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         airPlayVideoPlayer.play(location, startPositionSeconds)
         // claim media-button routing for keys that arrive as media-session events
         mediaSession?.isActive = true
+        _startPlaybackHeartbeatMonitor()
         log("AirPlay Video play: $location @ ${startPositionSeconds}s")
     }
 
@@ -650,6 +802,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
             _videoResolution.value = "${w.toInt()}x${h.toInt()}"
             videoRenderer.setResolution(w.toInt(), h.toInt())
             _mirroringActive.value = true
+            if (shouldLaunchOnConnect()) launchMainActivity()
         }
         log("Video size: ${srcW}x${srcH} -> ${w}x${h}")
     }
@@ -725,6 +878,10 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
     override fun onConnectionDestroy() {
         _connectionCount.value = (_connectionCount.value - 1).coerceAtLeast(0)
         if (_connectionCount.value == 0) {
+            if (_mirroringActive.value) {
+                videoRenderer.stopSession()
+                _mirroringActive.value = false
+            }
             // clients may drop without POST /stop; must run before the poll-state reset
             _endVideoPlayback("AirPlay Video stopped (disconnect)")
             // last client gone: release audio output devices to save power
@@ -754,6 +911,13 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
 
     override fun onConnectionReset(reason: Int) {
         log("Connection reset: $reason")
+        if (_mirroringActive.value) {
+            videoRenderer.stopSession()
+            _mirroringActive.value = false
+        }
+        if (_videoPlaybackActive.value) {
+            _endVideoPlayback("AirPlay Video stopped (reset)")
+        }
     }
 
     override fun onDisplayPin(pin: String) {
@@ -762,6 +926,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         _lastPin = pin
         pinCallback?.invoke(pin)
         _updateMediaNotification()
+        if (shouldLaunchOnConnect()) launchMainActivity()
     }
 
     override fun onMetadata(data: ByteArray) {
@@ -807,7 +972,12 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
     }
 
     override fun onMirrorRunning(running: Boolean) {
-        if (running) videoRenderer.startSession() else {
+        if (running) {
+            if (_videoPlaybackActive.value) {
+                stopVideoPlayback()
+            }
+            videoRenderer.startSession()
+        } else {
             videoRenderer.stopSession()
             _mirroringActive.value = false
         }
@@ -1071,12 +1241,56 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
 
     private fun launchMainActivity() {
         Handler(Looper.getMainLooper()).post {
-            val launchIntent = Intent(this, MainActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            val launchIntent = Intent(this, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
+            // 1. Direct startActivity (succeeds when SYSTEM_ALERT_WINDOW is granted or app is exempt)
             try {
                 startActivity(launchIntent)
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to launch activity", e)
+                Log.w(TAG, "Direct startActivity failed", e)
+            }
+
+            // 2. Full-Screen Intent via High-Priority Notification for background wake up
+            try {
+                val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    if (nm.getNotificationChannel(FSI_CHANNEL_ID) == null) {
+                        val channel = NotificationChannel(
+                            FSI_CHANNEL_ID,
+                            "AirPlay Casting Wakeup",
+                            NotificationManager.IMPORTANCE_HIGH
+                        ).apply {
+                            description = "后台投屏呼叫与全屏唤醒"
+                            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                        }
+                        nm.createNotificationChannel(channel)
+                    }
+                }
+
+                val fsiPendingIntent = PendingIntent.getActivity(
+                    this,
+                    FSI_REQUEST_CODE,
+                    launchIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+
+                val fsiNotification = NotificationCompat.Builder(this, FSI_CHANNEL_ID)
+                    .setSmallIcon(android.R.drawable.ic_media_play)
+                    .setContentTitle("投屏已连接")
+                    .setContentText("正在唤起投屏画面...")
+                    .setPriority(NotificationCompat.PRIORITY_MAX)
+                    .setCategory(NotificationCompat.CATEGORY_CALL)
+                    .setFullScreenIntent(fsiPendingIntent, true)
+                    .setAutoCancel(true)
+                    .build()
+
+                nm.notify(FSI_NOTIFICATION_ID, fsiNotification)
+                try {
+                    fsiPendingIntent.send()
+                } catch (_: Exception) {}
+            } catch (e: Exception) {
+                Log.w(TAG, "FullScreenIntent launch failed", e)
             }
         }
     }
@@ -1110,6 +1324,9 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         private const val VOL_SYNC_TIMEOUT_MS = 800L
         private const val CHANNEL_ID = "airplay_service"
         private const val NOTIFICATION_ID = 1
+        const val FSI_CHANNEL_ID = "airplay_fsi"
+        const val FSI_NOTIFICATION_ID = 2
+        const val FSI_REQUEST_CODE = 1001
         const val ACTION_PLAY_PAUSE = "io.github.jqssun.airplay.PLAY_PAUSE"
         const val ACTION_NEXT = "io.github.jqssun.airplay.NEXT"
         const val ACTION_PREV = "io.github.jqssun.airplay.PREV"
@@ -1117,6 +1334,8 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         // shared with dpad/double-tap seeks
         const val VIDEO_SEEK_STEP_MS = 10_000L
         const val VIDEO_POLL_PENDING_TIMEOUT_MS = 3_000L
+        const val DLNA_HEARTBEAT_TIMEOUT_MS = 10_000L
+        const val AIRPLAY_POLL_TIMEOUT_MS = 8_000L
 
         private const val AUDIO_CONFIG_DEBOUNCE_MS = 500L
     }

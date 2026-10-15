@@ -279,6 +279,9 @@ class MainViewModel @Inject constructor(app: Application) : AndroidViewModel(app
 
 
     // logs
+    private val _logsEnabled = MutableStateFlow(prefs.getBoolean(Prefs.LOGS_ENABLED, Prefs.DEF_LOGS_ENABLED))
+    val logsEnabled: StateFlow<Boolean> = _logsEnabled.asStateFlow()
+
     private val _logs = MutableStateFlow<List<String>>(emptyList())
     val logs: StateFlow<List<String>> = _logs.asStateFlow()
     private val _logLock = Any()
@@ -291,7 +294,16 @@ class MainViewModel @Inject constructor(app: Application) : AndroidViewModel(app
         loadPersistedLogs()
     }
 
+    fun setLogsEnabled(enabled: Boolean) {
+        _logsEnabled.value = enabled
+        prefs.edit().putBoolean(Prefs.LOGS_ENABLED, enabled).apply()
+        if (enabled && _logs.value.isEmpty()) {
+            loadPersistedLogs()
+        }
+    }
+
     fun addLog(msg: String) {
+        if (!_logsEnabled.value) return
         val line = "${_dateFmt.get()!!.format(Date())} $msg"
         val snapshot: List<String>
         synchronized(_logLock) {
@@ -326,6 +338,10 @@ class MainViewModel @Inject constructor(app: Application) : AndroidViewModel(app
     }
 
     private fun loadPersistedLogs() {
+        if (!prefs.getBoolean(Prefs.LOGS_ENABLED, Prefs.DEF_LOGS_ENABLED)) {
+            _logs.value = emptyList()
+            return
+        }
         val snapshot: List<String>
         synchronized(_logLock) {
             val restored = runCatching {

@@ -67,10 +67,18 @@
     <string name="dialog_pin_title">AirPlay PIN</string>
     <string name="btn_ok">OK</string>
 
-    <!-- Logs screen -->
+    <!-- Logs screen & settings -->
     <string name="btn_export">Export</string>
     <string name="btn_clear">Clear</string>
+    <string name="btn_back">Back</string>
     <string name="export_logs_chooser_title">Export logs</string>
+    <string name="section_logs">Logs</string>
+    <string name="setting_logs_enabled">Enable logs</string>
+    <string name="setting_logs_enabled_desc">Record debug and connection logs (disabled by default to save storage)</string>
+    <string name="btn_view_logs">View logs</string>
+    <string name="desc_view_logs">Inspect runtime logs</string>
+    <string name="btn_open_logs">Open</string>
+    <string name="logs_disabled_hint">Logs are disabled. You can turn them on in Settings.</string>
 
     <!-- Settings sections -->
     <string name="section_server">Server</string>
@@ -110,9 +118,9 @@
     <string name="setting_alac_desc">Offer ALAC in the mDNS record; used for music streaming</string>
     <string name="setting_aac">Advertise AAC codec</string>
     <string name="setting_aac_desc">Offer AAC-ELD/AAC-LC in the mDNS record; used for screen mirroring audio</string>
-    <string name="setting_launch_on_connect">Open this application on connect</string>
-    <string name="setting_launch_on_connect_desc">Show the screen when a client connects</string>
-    <string name="setting_launch_on_connect_no_permission">Tap to grant Display over other apps permission</string>
+    <string name="setting_launch_on_connect">收到投屏时自动唤醒界面</string>
+    <string name="setting_launch_on_connect_desc">设备收到 AirPlay/DLNA 投屏时自动弹到前台显示画面</string>
+    <string name="setting_launch_on_connect_no_permission">⚠️ 未授权悬浮窗：点击前往系统设置开启「允许显示在其他应用上层」</string>
     <string name="setting_resolution">Resolution</string>
     <string name="setting_resolution_desc">Video resolution advertised to clients</string>
     <string name="setting_resolution_placeholder">[W]x[H]</string>
