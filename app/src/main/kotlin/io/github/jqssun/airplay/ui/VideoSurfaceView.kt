@@ -37,8 +37,14 @@ fun VideoSurfaceView(
     AndroidView(
         factory = { ctx ->
             SurfaceView(ctx).also {
+                it.keepScreenOn = true
+                it.holder.setKeepScreenOn(true)
                 it.holder.addCallback(callbacks)
             }
+        },
+        update = {
+            it.keepScreenOn = true
+            it.holder.setKeepScreenOn(true)
         },
         modifier = if (applyAspectRatio) {
             modifier

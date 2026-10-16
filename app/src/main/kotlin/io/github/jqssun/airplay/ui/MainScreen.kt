@@ -40,6 +40,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import android.content.Context
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -131,7 +132,19 @@ fun MainScreen(
     }
 
     val activity = LocalContext.current as? Activity
+    val currentView = LocalView.current
     val videoScreen = videoPlaybackActive || videoSessionPending
+    val isPlayingScreen = videoScreen || mirroringActive
+    DisposableEffect(isPlayingScreen) {
+        if (isPlayingScreen) {
+            currentView.keepScreenOn = true
+        }
+        onDispose {
+            if (isPlayingScreen) {
+                currentView.keepScreenOn = false
+            }
+        }
+    }
     LaunchedEffect(fullscreen, videoScreen) {
         val window = activity?.window ?: return@LaunchedEffect
         val controller = WindowInsetsControllerCompat(window, window.decorView)

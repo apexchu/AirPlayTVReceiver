@@ -67,6 +67,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -85,6 +86,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
     private var nativeHandle = 0L
     private var nsdManager: NsdServiceManager? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var screenWakeLock: PowerManager.WakeLock? = null
     private var foregroundStarted = false
     private var lastOrientation = Configuration.ORIENTATION_UNDEFINED
 
@@ -423,6 +425,13 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
                 .debounce(AUDIO_CONFIG_DEBOUNCE_MS)
                 .collect { audioRenderer.updateConfig(it) }
         }
+        lifecycleScope.launch {
+            combine(_videoPlaybackActive, _mirroringActive) { video, mirroring ->
+                video || mirroring
+            }.collect { active ->
+                _updateScreenWakeLock(active)
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -741,6 +750,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         dacpController = null
         mediaSession?.release()
         mediaSession = null
+        _updateScreenWakeLock(false)
         super.onDestroy()
     }
 
@@ -1309,6 +1319,39 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         if (_serverState.value != ServerState.RUNNING) return
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(NOTIFICATION_ID, _buildMediaNotification())
+    }
+
+    private fun _updateScreenWakeLock(active: Boolean) {
+        _mainHandler.post {
+            if (active) {
+                if (screenWakeLock == null) {
+                    try {
+                        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                        @Suppress("DEPRECATION")
+                        screenWakeLock = pm.newWakeLock(
+                            PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE,
+                            "airplay:screen_playback"
+                        ).apply {
+                            setReferenceCounted(false)
+                            acquire()
+                        }
+                        log("Screen wake lock acquired for playback")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to acquire screen wake lock", e)
+                    }
+                }
+            } else {
+                screenWakeLock?.let {
+                    try {
+                        if (it.isHeld) it.release()
+                        log("Screen wake lock released")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to release screen wake lock", e)
+                    }
+                }
+                screenWakeLock = null
+            }
+        }
     }
 
     enum class ServerState {

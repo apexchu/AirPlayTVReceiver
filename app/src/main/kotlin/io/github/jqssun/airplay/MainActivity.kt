@@ -107,9 +107,20 @@ class MainActivity : ComponentActivity() {
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                viewModel.keepScreenOn.collect { keep ->
-                    if (keep) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                combine(
+                    viewModel.keepScreenOn,
+                    viewModel.videoPlaybackActive,
+                    viewModel.mirroringActive
+                ) { keepSetting, videoActive, mirrorActive ->
+                    keepSetting || videoActive || mirrorActive
+                }.collect { keep ->
+                    if (keep) {
+                        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                        window.decorView.keepScreenOn = true
+                    } else {
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                        window.decorView.keepScreenOn = false
+                    }
                 }
             }
         }

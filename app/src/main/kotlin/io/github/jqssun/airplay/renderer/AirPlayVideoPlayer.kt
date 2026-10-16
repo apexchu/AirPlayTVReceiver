@@ -72,6 +72,7 @@ class AirPlayVideoPlayer(private val context: Context) {
         // recycling must not report the stopped sentinel: senders poll right after /play
         _stopInternal(reportStopped = false)
         val p = ExoPlayer.Builder(context).build().also {
+            it.setWakeMode(C.WAKE_MODE_NETWORK)
             it.addListener(_listener)
             pendingSurface?.let { s -> it.setVideoSurface(s) }
         }
