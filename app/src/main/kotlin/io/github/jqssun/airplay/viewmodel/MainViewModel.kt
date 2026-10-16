@@ -92,6 +92,9 @@ class MainViewModel @Inject constructor(app: Application) : AndroidViewModel(app
     private val _serverState = MutableStateFlow(ServerState.STOPPED)
     val serverState: StateFlow<ServerState> = _serverState.asStateFlow()
 
+    private val _dlnaRunning = MutableStateFlow(false)
+    val dlnaRunning: StateFlow<Boolean> = _dlnaRunning.asStateFlow()
+
     private val _connectionCount = MutableStateFlow(0)
     val connectionCount: StateFlow<Int> = _connectionCount.asStateFlow()
 
@@ -580,6 +583,7 @@ class MainViewModel @Inject constructor(app: Application) : AndroidViewModel(app
     fun updateFromService() {
         service?.let {
             _serverState.value = it.serverState.value
+            _dlnaRunning.value = it.dlnaRunning.value
             _connectionCount.value = it.connectionCount.value
             _videoAspect.value = it.videoAspect.value
             _videoResolution.value = it.videoResolution.value

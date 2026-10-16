@@ -40,7 +40,7 @@ fun isTv(): Boolean {
 
 fun Modifier.dpadFocus(shape: Shape = RoundedCornerShape(12.dp)): Modifier = composed {
     var focused by remember { mutableStateOf(false) }
-    onFocusChanged { focused = it.isFocused }
+    onFocusChanged { focused = it.isFocused || it.hasFocus }
         .border(2.dp, if (focused) MaterialTheme.colorScheme.primary else Color.Transparent, shape)
 }
 

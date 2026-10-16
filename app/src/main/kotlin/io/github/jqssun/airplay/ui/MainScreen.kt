@@ -11,7 +11,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -81,6 +82,8 @@ import androidx.media3.ui.compose.material3.indicator.PositionText
 import androidx.media3.ui.compose.material3.indicator.ProgressSlider
 import kotlin.math.abs
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.gestures.detectTapGestures
 
 private enum class Tab(val labelRes: Int, val icon: ImageVector) {
     OVERVIEW(R.string.tab_overview, Icons.Default.Cast),
@@ -532,6 +535,10 @@ fun MainScreen(
         LogsScreen(viewModel = viewModel, onBack = { showLogs = false })
     } else {
         BackHandler(enabled = tab == Tab.SETTINGS) { tab = Tab.OVERVIEW }
+        val settingsScrollState = rememberScrollState()
+        val settingsFirstItemFocusRequester = remember { FocusRequester() }
+        val settingsLastItemFocusRequester = remember { FocusRequester() }
+        val coroutineScope = rememberCoroutineScope()
         Scaffold(
             bottomBar = {
                 Column {
@@ -572,15 +579,45 @@ fun MainScreen(
                                 ),
                                 modifier = Modifier
                                     .onFocusChanged { isFocused = it.isFocused }
-                                    .onKeyEvent { event ->
-                                        if (tab == Tab.SETTINGS && event.type == KeyEventType.KeyDown &&
-                                            (event.key == Key.DirectionLeft || event.key == Key.DirectionRight)
-                                        ) {
-                                            tab = Tab.OVERVIEW
-                                            true
-                                        } else {
-                                            false
-                                        }
+                                    .onPreviewKeyEvent { event ->
+                                        if (event.type == KeyEventType.KeyDown) {
+                                            when (t) {
+                                                Tab.OVERVIEW -> {
+                                                    if (event.key == Key.DirectionRight) {
+                                                        tab = Tab.SETTINGS
+                                                        coroutineScope.launch {
+                                                            settingsScrollState.scrollTo(0)
+                                                            settingsFirstItemFocusRequester.requestFocusUntilLanded(attempts = 20)
+                                                        }
+                                                        true
+                                                    } else false
+                                                }
+                                                Tab.SETTINGS -> {
+                                                    when (event.key) {
+                                                        Key.DirectionLeft -> {
+                                                            tab = Tab.OVERVIEW
+                                                            true
+                                                        }
+                                                        Key.DirectionRight -> true
+                                                        Key.DirectionDown -> {
+                                                            coroutineScope.launch {
+                                                                settingsScrollState.scrollTo(0)
+                                                                settingsFirstItemFocusRequester.requestFocusUntilLanded(attempts = 20)
+                                                            }
+                                                            true
+                                                        }
+                                                        Key.DirectionUp -> {
+                                                            coroutineScope.launch {
+                                                                settingsScrollState.scrollTo(settingsScrollState.maxValue)
+                                                                settingsLastItemFocusRequester.requestFocusUntilLanded(attempts = 20)
+                                                            }
+                                                            true
+                                                        }
+                                                        else -> false
+                                                    }
+                                                }
+                                            }
+                                        } else false
                                     }
                             )
                         }
@@ -591,24 +628,40 @@ fun MainScreen(
             Box(
                 modifier = Modifier
                     .padding(padding)
-                    .thenIf(tab == Tab.SETTINGS) {
-                        onKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown &&
-                                (event.key == Key.DirectionLeft || event.key == Key.DirectionRight)
-                            ) {
-                                tab = Tab.OVERVIEW
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown) {
+                            if (tab == Tab.OVERVIEW && event.key == Key.DirectionRight) {
+                                tab = Tab.SETTINGS
+                                coroutineScope.launch {
+                                    settingsScrollState.scrollTo(0)
+                                    settingsFirstItemFocusRequester.requestFocusUntilLanded(attempts = 20)
+                                }
                                 true
                             } else {
                                 false
                             }
-                        }
+                        } else false
                     }
             ) {
                 TabContent(
-                    tab, viewModel, video,
-                    onFullscreen = { fullscreen = true }, onPip = onPip, showAudioMode = audioOnly,
+                    tab = tab,
+                    viewModel = viewModel,
+                    video = video,
+                    onFullscreen = { fullscreen = true },
+                    onPip = onPip,
+                    showAudioMode = audioOnly,
                     onViewLogs = { showLogs = true },
-                    onNavigateToOverview = { tab = Tab.OVERVIEW }
+                    onNavigateToOverview = { tab = Tab.OVERVIEW },
+                    onNavigateToSettings = {
+                        tab = Tab.SETTINGS
+                        coroutineScope.launch {
+                            settingsScrollState.scrollTo(0)
+                            settingsFirstItemFocusRequester.requestFocusUntilLanded(attempts = 20)
+                        }
+                    },
+                    settingsScrollState = settingsScrollState,
+                    settingsFirstItemFocusRequester = settingsFirstItemFocusRequester,
+                    settingsLastItemFocusRequester = settingsLastItemFocusRequester
                 )
             }
         }
@@ -644,17 +697,25 @@ private fun TabContent(
     onPip: () -> Unit,
     showAudioMode: Boolean,
     onViewLogs: () -> Unit,
-    onNavigateToOverview: () -> Unit = {}
+    onNavigateToOverview: () -> Unit = {},
+    onNavigateToSettings: () -> Unit = {},
+    settingsScrollState: ScrollState = rememberScrollState(),
+    settingsFirstItemFocusRequester: FocusRequester = remember { FocusRequester() },
+    settingsLastItemFocusRequester: FocusRequester = remember { FocusRequester() }
 ) {
     when (tab) {
         Tab.OVERVIEW -> OverviewContent(
             viewModel, video,
-            onFullscreen = onFullscreen, onPip = onPip, showAudioMode = showAudioMode
+            onFullscreen = onFullscreen, onPip = onPip, showAudioMode = showAudioMode,
+            onNavigateToSettings = onNavigateToSettings
         )
         Tab.SETTINGS -> SettingsScreen(
             viewModel,
             onViewLogs = onViewLogs,
-            onNavigateToOverview = onNavigateToOverview
+            onNavigateToOverview = onNavigateToOverview,
+            scrollState = settingsScrollState,
+            firstItemRequester = settingsFirstItemFocusRequester,
+            lastItemRequester = settingsLastItemFocusRequester
         )
     }
 }
@@ -665,9 +726,12 @@ private fun OverviewContent(
     video: @Composable () -> Unit,
     onFullscreen: () -> Unit,
     onPip: () -> Unit,
-    showAudioMode: Boolean = false
+    showAudioMode: Boolean = false,
+    onNavigateToSettings: () -> Unit = {}
 ) {
     val state by viewModel.serverState.collectAsState()
+    val dlnaRunning by viewModel.dlnaRunning.collectAsState()
+    val airplayRunning = state == ServerState.RUNNING
     val connections by viewModel.connectionCount.collectAsState()
     val serverName by viewModel.serverName.collectAsState()
     val videoResolution by viewModel.videoResolution.collectAsState()
@@ -677,12 +741,25 @@ private fun OverviewContent(
     val debugEnabled by viewModel.debugEnabled.collectAsState()
     val debugInfo by viewModel.debugInfo.collectAsState()
 
+    val overviewFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        overviewFocusRequester.requestFocusUntilLanded(attempts = 20)
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .focusRequester(overviewFocusRequester)
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight) {
+                    onNavigateToSettings()
+                    true
+                } else false
+            },
         contentAlignment = Alignment.Center
     ) {
         // Top-left: Server name + status badge
@@ -701,26 +778,55 @@ private fun OverviewContent(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.width(10.dp))
+                // AirPlay status badge
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Box(
                             modifier = Modifier
                                 .size(8.dp)
                                 .clip(CircleShape)
                                 .background(
-                                    if (state == ServerState.RUNNING) Color(0xFF4CAF50)
+                                    if (airplayRunning) Color(0xFF4CAF50)
                                     else MaterialTheme.colorScheme.error
                                 )
                         )
-                        Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(6.dp))
                         Text(
-                            text = if (state == ServerState.RUNNING) "服务运行中" else stringResource(R.string.stopped_label),
+                            text = if (airplayRunning) "AirPlay 运行中" else "AirPlay 停止",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                // DLNA status badge
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (dlnaRunning) Color(0xFF4CAF50)
+                                    else MaterialTheme.colorScheme.error
+                                )
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = if (dlnaRunning) "DLNA 运行中" else "DLNA 停止",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onPrimaryContainer

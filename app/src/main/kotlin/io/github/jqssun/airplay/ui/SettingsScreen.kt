@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package io.github.jqssun.airplay.ui
 
 import android.content.Context
@@ -5,7 +7,10 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
@@ -16,17 +21,25 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -43,7 +56,10 @@ import kotlin.math.roundToInt
 fun SettingsScreen(
     viewModel: MainViewModel,
     onViewLogs: () -> Unit = {},
-    onNavigateToOverview: () -> Unit = {}
+    onNavigateToOverview: () -> Unit = {},
+    scrollState: ScrollState = rememberScrollState(),
+    firstItemRequester: FocusRequester = remember { FocusRequester() },
+    lastItemRequester: FocusRequester = remember { FocusRequester() }
 ) {
     val logsEnabled by viewModel.logsEnabled.collectAsState()
     val serverName by viewModel.serverName.collectAsState()
@@ -83,20 +99,34 @@ fun SettingsScreen(
     val customDnsEnabled by viewModel.customDnsEnabled.collectAsState()
     val customDnsServers by viewModel.customDnsServers.collectAsState()
 
+    val coroutineScope = rememberCoroutineScope()
+    fun jumpToFirstItem() {
+        coroutineScope.launch {
+            scrollState.scrollTo(0)
+            firstItemRequester.requestFocusUntilLanded(attempts = 20)
+        }
+    }
+    fun jumpToLastItem() {
+        coroutineScope.launch {
+            scrollState.scrollTo(scrollState.maxValue)
+            lastItemRequester.requestFocusUntilLanded(attempts = 20)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        firstItemRequester.requestFocusUntilLanded(attempts = 20)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .padding(vertical = 8.dp)
             .onKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown &&
-                    (event.key == Key.DirectionLeft || event.key == Key.DirectionRight)
-                ) {
+                if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft) {
                     onNavigateToOverview()
                     true
-                } else {
-                    false
-                }
+                } else false
             }
     ) {
         SectionHeader(stringResource(R.string.section_server))
@@ -104,28 +134,35 @@ fun SettingsScreen(
         SettingTextField(
             label = stringResource(R.string.setting_server_name),
             value = serverName,
-            onCommit = { viewModel.setServerName(it) }
+            onCommit = { viewModel.setServerName(it) },
+            modifier = Modifier.focusRequester(firstItemRequester),
+            onNavigateToOverview = onNavigateToOverview,
+            isFirstItem = true,
+            onJumpToLast = ::jumpToLastItem
         )
 
         SettingTextField(
             label = stringResource(R.string.setting_server_port),
             value = serverPort.toString(),
             onCommit = { viewModel.setServerPort(it.toInt()) },
-            range = 1..65535
+            range = 1..65535,
+            onNavigateToOverview = onNavigateToOverview
         )
 
         SettingSwitch(
             title = stringResource(R.string.setting_boot_auto_start),
             description = stringResource(R.string.setting_boot_auto_start_desc),
             checked = bootAutoStart,
-            onCheckedChange = { viewModel.setBootAutoStart(it) }
+            onCheckedChange = { viewModel.setBootAutoStart(it) },
+            onNavigateToOverview = onNavigateToOverview
         )
 
         SettingSwitch(
             title = stringResource(R.string.setting_run_in_background),
             description = stringResource(R.string.setting_run_in_background_desc),
             checked = runInBackground,
-            onCheckedChange = { viewModel.setRunInBackground(it) }
+            onCheckedChange = { viewModel.setRunInBackground(it) },
+            onNavigateToOverview = onNavigateToOverview
         )
 
         SectionHeader(stringResource(R.string.section_connection))
@@ -134,28 +171,32 @@ fun SettingsScreen(
             title = stringResource(R.string.setting_require_pin),
             description = stringResource(R.string.setting_require_pin_desc),
             checked = requirePin,
-            onCheckedChange = { viewModel.setRequirePin(it) }
+            onCheckedChange = { viewModel.setRequirePin(it) },
+            onNavigateToOverview = onNavigateToOverview
         )
 
         SettingSwitch(
             title = stringResource(R.string.setting_allow_new_conn),
             description = stringResource(R.string.setting_allow_new_conn_desc),
             checked = allowNewConn,
-            onCheckedChange = { viewModel.setAllowNewConn(it) }
+            onCheckedChange = { viewModel.setAllowNewConn(it) },
+            onNavigateToOverview = onNavigateToOverview
         )
 
         SettingSwitch(
             title = stringResource(R.string.setting_custom_dns),
             description = stringResource(R.string.setting_custom_dns_desc),
             checked = customDnsEnabled,
-            onCheckedChange = { viewModel.setCustomDnsEnabled(it) }
+            onCheckedChange = { viewModel.setCustomDnsEnabled(it) },
+            onNavigateToOverview = onNavigateToOverview
         )
 
         if (customDnsEnabled) {
             SettingTextField(
                 label = stringResource(R.string.setting_custom_dns_servers),
                 value = customDnsServers,
-                onCommit = { viewModel.setCustomDnsServers(it) }
+                onCommit = { viewModel.setCustomDnsServers(it) },
+                onNavigateToOverview = onNavigateToOverview
             )
         }
 
@@ -172,6 +213,18 @@ fun SettingsScreen(
         val needsOverlayPermission = launchOnConnect && !hasOverlayPermission
         ListItem(
             modifier = Modifier
+                .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown) {
+                        when (event.key) {
+                            Key.DirectionLeft -> {
+                                onNavigateToOverview()
+                                true
+                            }
+                            Key.DirectionRight -> true
+                            else -> false
+                        }
+                    } else false
+                }
                 .dpadFocus(RectangleShape)
                 .clickable {
                     if (!canAutoLaunch(ctx)) {
@@ -207,12 +260,14 @@ fun SettingsScreen(
             title = stringResource(R.string.setting_auto_fullscreen),
             description = stringResource(R.string.setting_auto_fullscreen_desc),
             checked = autoFullscreen,
-            onCheckedChange = { viewModel.setAutoFullscreen(it) }
+            onCheckedChange = { viewModel.setAutoFullscreen(it) },
+            onNavigateToOverview = onNavigateToOverview
         )
 
         SettingResolution(
             value = resolution,
-            onValueChange = { viewModel.setResolution(it) }
+            onValueChange = { viewModel.setResolution(it) },
+            onNavigateToOverview = onNavigateToOverview
         )
 
         SettingChipField(
@@ -222,14 +277,16 @@ fun SettingsScreen(
             presets = listOf("24" to "24", "30" to "30", "60" to "60", "120" to "120"),
             placeholder = stringResource(R.string.setting_max_fps_placeholder),
             keyboardType = KeyboardType.Number,
-            onValueChange = { it.toIntOrNull()?.let { v -> viewModel.setMaxFps(v) } }
+            onValueChange = { it.toIntOrNull()?.let { v -> viewModel.setMaxFps(v) } },
+            onNavigateToOverview = onNavigateToOverview
         )
 
         SettingSwitch(
             title = stringResource(R.string.setting_overscanned),
             description = stringResource(R.string.setting_overscanned_desc),
             checked = overscanned,
-            onCheckedChange = { viewModel.setOverscanned(it) }
+            onCheckedChange = { viewModel.setOverscanned(it) },
+            onNavigateToOverview = onNavigateToOverview
         )
 
         SectionHeader(stringResource(R.string.section_decode))
@@ -238,14 +295,16 @@ fun SettingsScreen(
             title = stringResource(R.string.setting_h265),
             description = stringResource(R.string.setting_h265_desc),
             checked = h265Enabled,
-            onCheckedChange = { viewModel.setH265Enabled(it) }
+            onCheckedChange = { viewModel.setH265Enabled(it) },
+            onNavigateToOverview = onNavigateToOverview
         )
 
         SettingSwitch(
             title = stringResource(R.string.setting_sw_alac),
             description = stringResource(R.string.setting_sw_alac_desc),
             checked = forceSwAlac,
-            onCheckedChange = { viewModel.setForceSwAlac(it) }
+            onCheckedChange = { viewModel.setForceSwAlac(it) },
+            onNavigateToOverview = onNavigateToOverview
         )
 
         SectionHeader(stringResource(R.string.section_logs))
@@ -254,11 +313,24 @@ fun SettingsScreen(
             title = stringResource(R.string.setting_logs_enabled),
             description = stringResource(R.string.setting_logs_enabled_desc),
             checked = logsEnabled,
-            onCheckedChange = { viewModel.setLogsEnabled(it) }
+            onCheckedChange = { viewModel.setLogsEnabled(it) },
+            onNavigateToOverview = onNavigateToOverview
         )
 
         ListItem(
             modifier = Modifier
+                .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown) {
+                        when (event.key) {
+                            Key.DirectionLeft -> {
+                                onNavigateToOverview()
+                                true
+                            }
+                            Key.DirectionRight -> true
+                            else -> false
+                        }
+                    } else false
+                }
                 .dpadFocus(RectangleShape)
                 .clickable { onViewLogs() },
             headlineContent = { Text(stringResource(R.string.btn_view_logs)) },
@@ -279,7 +351,11 @@ fun SettingsScreen(
             title = stringResource(R.string.setting_developer_options),
             description = stringResource(R.string.setting_developer_options_desc),
             checked = developerOptions,
-            onCheckedChange = { viewModel.setDeveloperOptions(it) }
+            onCheckedChange = { viewModel.setDeveloperOptions(it) },
+            modifier = Modifier.thenIf(!developerOptions) { focusRequester(lastItemRequester) },
+            onNavigateToOverview = onNavigateToOverview,
+            isLastItem = !developerOptions,
+            onJumpToFirst = ::jumpToFirstItem
         )
 
         if (developerOptions) {
@@ -287,70 +363,80 @@ fun SettingsScreen(
                 title = stringResource(R.string.setting_auto_start),
                 description = stringResource(R.string.setting_auto_start_desc),
                 checked = autoStart,
-                onCheckedChange = { viewModel.setAutoStart(it) }
+                onCheckedChange = { viewModel.setAutoStart(it) },
+                onNavigateToOverview = onNavigateToOverview
             )
 
             SettingSwitch(
                 title = stringResource(R.string.setting_keep_screen_on),
                 description = stringResource(R.string.setting_keep_screen_on_desc),
                 checked = keepScreenOn,
-                onCheckedChange = { viewModel.setKeepScreenOn(it) }
+                onCheckedChange = { viewModel.setKeepScreenOn(it) },
+                onNavigateToOverview = onNavigateToOverview
             )
 
             SettingSwitch(
                 title = stringResource(R.string.setting_idle_preview),
                 description = stringResource(R.string.setting_idle_preview_desc),
                 checked = idlePreview,
-                onCheckedChange = { viewModel.setIdlePreview(it) }
+                onCheckedChange = { viewModel.setIdlePreview(it) },
+                onNavigateToOverview = onNavigateToOverview
             )
 
             SettingSwitch(
                 title = stringResource(R.string.setting_advertise_video),
                 description = stringResource(R.string.setting_advertise_video_desc),
                 checked = advertiseVideo,
-                onCheckedChange = { viewModel.setAdvertiseVideo(it) }
+                onCheckedChange = { viewModel.setAdvertiseVideo(it) },
+                onNavigateToOverview = onNavigateToOverview
             )
 
             SettingSwitch(
                 title = stringResource(R.string.setting_advertise_audio),
                 description = stringResource(R.string.setting_advertise_audio_desc),
                 checked = advertiseAudio,
-                onCheckedChange = { viewModel.setAdvertiseAudio(it) }
+                onCheckedChange = { viewModel.setAdvertiseAudio(it) },
+                onNavigateToOverview = onNavigateToOverview
             )
 
             SettingSwitch(
                 title = stringResource(R.string.setting_alac),
                 description = stringResource(R.string.setting_alac_desc),
                 checked = alacEnabled,
-                onCheckedChange = { viewModel.setAlacEnabled(it) }
+                onCheckedChange = { viewModel.setAlacEnabled(it) },
+                onNavigateToOverview = onNavigateToOverview
             )
 
             SettingSwitch(
                 title = stringResource(R.string.setting_aac),
                 description = stringResource(R.string.setting_aac_desc),
                 checked = aacEnabled,
-                onCheckedChange = { viewModel.setAacEnabled(it) }
+                onCheckedChange = { viewModel.setAacEnabled(it) },
+                onNavigateToOverview = onNavigateToOverview
             )
 
             SettingSwitch(
                 title = stringResource(R.string.setting_key_allow_frame_drop),
                 description = stringResource(R.string.setting_key_allow_frame_drop_desc),
                 checked = keyAllowFrameDrop,
-                onCheckedChange = { viewModel.setKeyAllowFrameDrop(it) }
+                onCheckedChange = { viewModel.setKeyAllowFrameDrop(it) },
+                onNavigateToOverview = onNavigateToOverview
             )
 
             SettingSwitch(
                 title = stringResource(R.string.setting_enforce_sdr),
                 description = stringResource(R.string.setting_enforce_sdr_desc),
                 checked = enforceSdr,
-                onCheckedChange = { viewModel.setEnforceSdr(it) }
+                onCheckedChange = { viewModel.setEnforceSdr(it) },
+                onNavigateToOverview = onNavigateToOverview
             )
 
             SettingSwitch(
                 title = stringResource(R.string.setting_realtime_decoder_priority),
                 description = stringResource(R.string.setting_realtime_decoder_priority_desc),
                 checked = realtimeDecoderPriority,
-                onCheckedChange = { viewModel.setRealtimeDecoderPriority(it) }
+                onCheckedChange = { viewModel.setRealtimeDecoderPriority(it) },
+                onNavigateToOverview = onNavigateToOverview
             )
 
             SettingChips(
@@ -362,28 +448,32 @@ fun SettingsScreen(
                     Prefs.ON to stringResource(R.string.chip_on),
                     Prefs.OFF to stringResource(R.string.chip_off),
                 ),
-                onValueChange = { viewModel.setOperatingRate(it) }
+                onValueChange = { viewModel.setOperatingRate(it) },
+                onNavigateToOverview = onNavigateToOverview
             )
 
             SettingSwitch(
                 title = stringResource(R.string.setting_low_latency),
                 description = stringResource(R.string.setting_low_latency_desc),
                 checked = lowLatency,
-                onCheckedChange = { viewModel.setLowLatency(it) }
+                onCheckedChange = { viewModel.setLowLatency(it) },
+                onNavigateToOverview = onNavigateToOverview
             )
 
             SettingSwitch(
                 title = stringResource(R.string.setting_scheduled_output_buffer_release),
                 description = stringResource(R.string.setting_scheduled_output_buffer_release_desc),
                 checked = scheduledOutputBufferRelease,
-                onCheckedChange = { viewModel.setScheduledOutputBufferRelease(it) }
+                onCheckedChange = { viewModel.setScheduledOutputBufferRelease(it) },
+                onNavigateToOverview = onNavigateToOverview
             )
 
             SettingSwitch(
                 title = stringResource(R.string.setting_audio_delay),
                 description = stringResource(R.string.setting_audio_delay_desc),
                 checked = audioLatencyMs >= 0,
-                onCheckedChange = { viewModel.setAudioLatencyMs(if (it) 250 else -1) }
+                onCheckedChange = { viewModel.setAudioLatencyMs(if (it) 250 else -1) },
+                onNavigateToOverview = onNavigateToOverview
             )
 
             if (audioLatencyMs >= 0) {
@@ -410,7 +500,8 @@ fun SettingsScreen(
                 title = stringResource(R.string.setting_audio_auto_buffer),
                 description = stringResource(R.string.setting_audio_auto_buffer_desc),
                 checked = audioAutoBuffer,
-                onCheckedChange = { viewModel.setAudioAutoBuffer(it) }
+                onCheckedChange = { viewModel.setAudioAutoBuffer(it) },
+                onNavigateToOverview = onNavigateToOverview
             )
 
             if (audioAutoBuffer) {
@@ -443,7 +534,8 @@ fun SettingsScreen(
                     value = audioCushionMs.toString(),
                     onCommit = { viewModel.setAudioCushionMs(it.toInt()) },
                     description = stringResource(R.string.setting_audio_cushion_ms_desc),
-                    range = 1..1000
+                    range = 1..1000,
+                    onNavigateToOverview = onNavigateToOverview
                 )
             }
 
@@ -452,7 +544,8 @@ fun SettingsScreen(
                 value = oboeBufferFrames.toString(),
                 onCommit = { viewModel.setOboeBufferFrames(it.toInt()) },
                 description = stringResource(R.string.setting_oboe_buffer_frames_desc),
-                range = 0..8192
+                range = 0..8192,
+                onNavigateToOverview = onNavigateToOverview
             )
 
 
@@ -460,18 +553,24 @@ fun SettingsScreen(
                 title = stringResource(R.string.setting_debug_overlay),
                 description = stringResource(R.string.setting_debug_overlay_desc),
                 checked = debugEnabled,
-                onCheckedChange = { viewModel.setDebugEnabled(it) }
+                onCheckedChange = { viewModel.setDebugEnabled(it) },
+                onNavigateToOverview = onNavigateToOverview
             )
 
             SettingSwitch(
                 title = stringResource(R.string.setting_benchmark_log),
                 description = stringResource(R.string.setting_benchmark_log_desc),
                 checked = benchmarkLog,
-                onCheckedChange = { viewModel.setBenchmarkLog(it) }
+                onCheckedChange = { viewModel.setBenchmarkLog(it) },
+                modifier = Modifier.focusRequester(lastItemRequester),
+                onNavigateToOverview = onNavigateToOverview,
+                isLastItem = true,
+                onJumpToFirst = ::jumpToFirstItem
             )
         }
     }
 }
+
 
 private fun canAutoLaunch(ctx: Context): Boolean =
     Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || Settings.canDrawOverlays(ctx)
@@ -494,7 +593,9 @@ private fun SectionHeader(title: String) {
 @Composable
 private fun SettingResolution(
     value: String,
-    onValueChange: (String) -> Unit
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    onNavigateToOverview: () -> Unit = {}
 ) {
     val presets = listOf(
         Prefs.AUTO to stringResource(R.string.chip_auto),
@@ -512,7 +613,29 @@ private fun SettingResolution(
     var width by remember(value) { mutableStateOf(if (isPreset) "" else parts[0]) }
     var height by remember(value) { mutableStateOf(if (isPreset) "" else parts.getOrElse(1) { "" }) }
 
+    val allKeys = remember {
+        listOf(Prefs.AUTO, "1280x720", "1920x1080", "3840x2160", "custom", "portrait", "landscape")
+    }
+    val optionRequesters = remember { allKeys.associateWith { FocusRequester() } }
+    val itemFocusRequester = remember { FocusRequester() }
+
+    val coroutineScope = rememberCoroutineScope()
+    val activeKey = if (presets.any { it.first == value }) value
+        else if (devicePresets.any { it.first == value }) value
+        else "custom"
+
+    fun focusActiveOption() {
+        coroutineScope.launch {
+            runCatching { optionRequesters[activeKey]?.requestFocus() }
+        }
+    }
+
     ListItem(
+        modifier = modifier
+            .focusProperties {
+                enter = { optionRequesters[activeKey] ?: FocusRequester.Default }
+            }
+            .focusGroup(),
         headlineContent = { Text(stringResource(R.string.setting_resolution)) },
         supportingContent = {
             Column {
@@ -520,7 +643,7 @@ private fun SettingResolution(
                 Spacer(Modifier.height(8.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     @Composable
-                    fun presetChip(key: String, label: String) = FilterChip(
+                    fun presetChip(key: String, label: String, isFirstInRow: Boolean = false) = FilterChip(
                         selected = value == key && !editing,
                         onClick = {
                             editing = false
@@ -528,16 +651,34 @@ private fun SettingResolution(
                             onValueChange(key)
                         },
                         label = { Text(label) },
-                        modifier = Modifier.dpadFocus()
+                        modifier = Modifier
+                            .thenIf(optionRequesters.containsKey(key)) {
+                                focusRequester(optionRequesters[key]!!)
+                            }
+                            .dpadFocus()
+                            .onPreviewKeyEvent { event ->
+                                if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft && isFirstInRow) {
+                                    onNavigateToOverview()
+                                    true
+                                } else false
+                            }
                     )
-                    presets.forEach { (key, label) -> presetChip(key, label) }
+                    presets.forEachIndexed { index, (key, label) ->
+                        presetChip(key, label, isFirstInRow = index == 0)
+                    }
                     FilterChip(
                         selected = !isPreset || editing,
                         onClick = { editing = true },
                         label = { Text(stringResource(R.string.chip_custom)) },
-                        modifier = Modifier.dpadFocus()
+                        modifier = Modifier
+                            .thenIf(optionRequesters.containsKey("custom")) {
+                                focusRequester(optionRequesters["custom"]!!)
+                            }
+                            .dpadFocus()
                     )
-                    devicePresets.forEach { (key, label) -> presetChip(key, label) }
+                    devicePresets.forEach { (key, label) ->
+                        presetChip(key, label)
+                    }
                 }
                 if (editing || !isPreset) {
                     Spacer(Modifier.height(8.dp))
@@ -591,8 +732,16 @@ private fun SettingTextField(
     value: String,
     onCommit: (String) -> Unit,
     description: String? = null,
-    range: IntRange? = null
+    range: IntRange? = null,
+    modifier: Modifier = Modifier,
+    onNavigateToOverview: () -> Unit = {},
+    isFirstItem: Boolean = false,
+    isLastItem: Boolean = false,
+    onJumpToFirst: () -> Unit = {},
+    onJumpToLast: () -> Unit = {}
 ) {
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     var text by remember(value) { mutableStateOf(value) }
     val valid = range == null || text.toIntOrNull()?.let { it in range } == true
     fun save() {
@@ -610,10 +759,43 @@ private fun SettingTextField(
             imeAction = ImeAction.Done
         ),
         keyboardActions = doneAndHide(::save),
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
             .padding(bottom = 8.dp)
+            .dpadFocus(RoundedCornerShape(4.dp))
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown) {
+                    when (event.key) {
+                        Key.DirectionLeft -> {
+                            keyboardController?.hide()
+                            onNavigateToOverview()
+                            true
+                        }
+                        Key.DirectionDown -> {
+                            keyboardController?.hide()
+                            if (isLastItem) {
+                                onJumpToFirst()
+                                true
+                            } else {
+                                focusManager.moveFocus(FocusDirection.Down)
+                                true
+                            }
+                        }
+                        Key.DirectionUp -> {
+                            keyboardController?.hide()
+                            if (isFirstItem) {
+                                onJumpToLast()
+                                true
+                            } else {
+                                focusManager.moveFocus(FocusDirection.Up)
+                                true
+                            }
+                        }
+                        else -> false
+                    }
+                } else false
+            }
             .onFocusChanged { if (!it.isFocused) save() }
     )
 }
@@ -626,26 +808,58 @@ private fun SettingChipField(
     presets: List<Pair<String, String>>,
     placeholder: String,
     keyboardType: KeyboardType = KeyboardType.Text,
-    onValueChange: (String) -> Unit
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    onNavigateToOverview: () -> Unit = {}
 ) {
     val isPreset = presets.any { it.first == value }
     var editing by remember { mutableStateOf(false) }
     var text by remember(value) { mutableStateOf(if (isPreset) "" else value) }
 
+    val coroutineScope = rememberCoroutineScope()
+    val allKeys = remember(presets) { presets.map { it.first } + "custom" }
+    val optionRequesters = remember(allKeys) { allKeys.associateWith { FocusRequester() } }
+    val itemFocusRequester = remember { FocusRequester() }
+
+    val activeKey = if (presets.any { it.first == value }) value else "custom"
+
+    fun focusActiveOption() {
+        coroutineScope.launch {
+            runCatching { optionRequesters[activeKey]?.requestFocus() }
+        }
+    }
+
     ListItem(
+        modifier = modifier
+            .focusProperties {
+                enter = { optionRequesters[activeKey] ?: FocusRequester.Default }
+            }
+            .focusGroup(),
         headlineContent = { Text(title) },
         supportingContent = {
             Column {
                 Text(description)
                 Spacer(Modifier.height(8.dp))
-                ChipRow(if (editing) "" else value, presets, { editing = false; text = ""; onValueChange(it) }) {
-                    FilterChip(
-                        selected = !isPreset || editing,
-                        onClick = { editing = true },
-                        label = { Text(stringResource(R.string.chip_custom)) },
-                        modifier = Modifier.dpadFocus()
-                    )
-                }
+                ChipRow(
+                    value = if (editing) "" else value,
+                    options = presets,
+                    onSelect = { editing = false; text = ""; onValueChange(it) },
+                    optionRequesters = optionRequesters,
+                    itemFocusRequester = itemFocusRequester,
+                    onNavigateToOverview = onNavigateToOverview,
+                    trailing = {
+                        FilterChip(
+                            selected = !isPreset || editing,
+                            onClick = { editing = true },
+                            label = { Text(stringResource(R.string.chip_custom)) },
+                            modifier = Modifier
+                                .thenIf(optionRequesters.containsKey("custom")) {
+                                    focusRequester(optionRequesters["custom"]!!)
+                                }
+                                .dpadFocus()
+                        )
+                    }
+                )
                 if (editing || !isPreset) {
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
@@ -677,15 +891,28 @@ private fun ChipRow(
     value: String,
     options: List<Pair<String, String>>,
     onSelect: (String) -> Unit,
+    optionRequesters: Map<String, FocusRequester> = emptyMap(),
+    itemFocusRequester: FocusRequester? = null,
+    onNavigateToOverview: () -> Unit = {},
     trailing: @Composable () -> Unit = {}
 ) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        options.forEach { (key, label) ->
+        options.forEachIndexed { index, (key, label) ->
             FilterChip(
                 selected = value == key,
                 onClick = { onSelect(key) },
                 label = { Text(label) },
-                modifier = Modifier.dpadFocus()
+                modifier = Modifier
+                    .thenIf(optionRequesters.containsKey(key)) {
+                        focusRequester(optionRequesters[key]!!)
+                    }
+                    .dpadFocus()
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft && index == 0) {
+                            onNavigateToOverview()
+                            true
+                        } else false
+                    }
             )
         }
         trailing()
@@ -698,15 +925,40 @@ private fun SettingChips(
     description: String,
     value: String,
     options: List<Pair<String, String>>,
-    onValueChange: (String) -> Unit
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    onNavigateToOverview: () -> Unit = {}
 ) {
+    val coroutineScope = rememberCoroutineScope()
+    val optionRequesters = remember(options) { options.map { it.first }.associateWith { FocusRequester() } }
+    val itemFocusRequester = remember { FocusRequester() }
+    val activeKey = if (options.any { it.first == value }) value else options.first().first
+
+    fun focusActiveOption() {
+        coroutineScope.launch {
+            runCatching { optionRequesters[activeKey]?.requestFocus() }
+        }
+    }
+
     ListItem(
+        modifier = modifier
+            .focusProperties {
+                enter = { optionRequesters[activeKey] ?: FocusRequester.Default }
+            }
+            .focusGroup(),
         headlineContent = { Text(title) },
         supportingContent = {
             Column {
                 Text(description)
                 Spacer(Modifier.height(8.dp))
-                ChipRow(value, options, onValueChange)
+                ChipRow(
+                    value = value,
+                    options = options,
+                    onSelect = onValueChange,
+                    optionRequesters = optionRequesters,
+                    itemFocusRequester = itemFocusRequester,
+                    onNavigateToOverview = onNavigateToOverview
+                )
             }
         }
     )
@@ -717,10 +969,40 @@ private fun SettingSwitch(
     title: String,
     description: String,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    onNavigateToOverview: () -> Unit = {},
+    isFirstItem: Boolean = false,
+    isLastItem: Boolean = false,
+    onJumpToFirst: () -> Unit = {},
+    onJumpToLast: () -> Unit = {}
 ) {
     ListItem(
-        modifier = Modifier
+        modifier = modifier
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown) {
+                    when (event.key) {
+                        Key.DirectionLeft -> {
+                            onNavigateToOverview()
+                            true
+                        }
+                        Key.DirectionRight -> true // Switch item does not respond to DirectionRight
+                        Key.DirectionDown -> {
+                            if (isLastItem) {
+                                onJumpToFirst()
+                                true
+                            } else false
+                        }
+                        Key.DirectionUp -> {
+                            if (isFirstItem) {
+                                onJumpToLast()
+                                true
+                            } else false
+                        }
+                        else -> false
+                    }
+                } else false
+            }
             .dpadFocus(RectangleShape)
             .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange),
         headlineContent = { Text(title) },

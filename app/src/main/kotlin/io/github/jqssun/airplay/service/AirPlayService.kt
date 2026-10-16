@@ -110,6 +110,9 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
     private val _serverState = MutableStateFlow(ServerState.STOPPED)
     val serverState = _serverState.asStateFlow()
 
+    private val _dlnaRunning = MutableStateFlow(false)
+    val dlnaRunning = _dlnaRunning.asStateFlow()
+
     private val _connectionCount = MutableStateFlow(0)
     val connectionCount = _connectionCount.asStateFlow()
 
@@ -539,6 +542,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         }
         promoteToForeground()
         dlnaManager = DlnaUpnpManager(this, dlnaCallback).apply { start(resolvedName) }
+        _dlnaRunning.value = dlnaManager?.isRunning == true
         log("Server started on port $port")
     }
 
@@ -587,6 +591,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         wakeLock = null
         dlnaManager?.stop()
         dlnaManager = null
+        _dlnaRunning.value = false
         _serverState.value = ServerState.ERROR
         if (foregroundStarted) {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -597,6 +602,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
     fun stopServer() {
         dlnaManager?.stop()
         dlnaManager = null
+        _dlnaRunning.value = false
         audioRenderer.detachEngine()
         if (nativeHandle != 0L) {
             NativeBridge.nativeStop(nativeHandle)

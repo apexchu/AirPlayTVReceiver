@@ -26,6 +26,8 @@ class DlnaUpnpManager(
     private val callback: CustomAVTransportService.DlnaPlaybackCallback
 ) {
     private var upnpService: UpnpService? = null
+    val isRunning: Boolean
+        get() = upnpService != null
     private var localDevice: LocalDevice? = null
     private val prefs: SharedPreferences by lazy {
         context.getSharedPreferences(Prefs.NAME, Context.MODE_PRIVATE)
