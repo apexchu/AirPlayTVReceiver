@@ -31,7 +31,12 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -526,6 +531,7 @@ fun MainScreen(
         BackHandler { showLogs = false }
         LogsScreen(viewModel = viewModel, onBack = { showLogs = false })
     } else {
+        BackHandler(enabled = tab == Tab.SETTINGS) { tab = Tab.OVERVIEW }
         Scaffold(
             bottomBar = {
                 Column {
@@ -564,18 +570,45 @@ fun MainScreen(
                                     unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                     unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                                 ),
-                                modifier = Modifier.onFocusChanged { isFocused = it.isFocused }
+                                modifier = Modifier
+                                    .onFocusChanged { isFocused = it.isFocused }
+                                    .onKeyEvent { event ->
+                                        if (tab == Tab.SETTINGS && event.type == KeyEventType.KeyDown &&
+                                            (event.key == Key.DirectionLeft || event.key == Key.DirectionRight)
+                                        ) {
+                                            tab = Tab.OVERVIEW
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    }
                             )
                         }
                     }
                 }
             }
         ) { padding ->
-            Box(modifier = Modifier.padding(padding)) {
+            Box(
+                modifier = Modifier
+                    .padding(padding)
+                    .thenIf(tab == Tab.SETTINGS) {
+                        onKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown &&
+                                (event.key == Key.DirectionLeft || event.key == Key.DirectionRight)
+                            ) {
+                                tab = Tab.OVERVIEW
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    }
+            ) {
                 TabContent(
                     tab, viewModel, video,
                     onFullscreen = { fullscreen = true }, onPip = onPip, showAudioMode = audioOnly,
-                    onViewLogs = { showLogs = true }
+                    onViewLogs = { showLogs = true },
+                    onNavigateToOverview = { tab = Tab.OVERVIEW }
                 )
             }
         }
@@ -610,14 +643,19 @@ private fun TabContent(
     onFullscreen: () -> Unit,
     onPip: () -> Unit,
     showAudioMode: Boolean,
-    onViewLogs: () -> Unit
+    onViewLogs: () -> Unit,
+    onNavigateToOverview: () -> Unit = {}
 ) {
     when (tab) {
         Tab.OVERVIEW -> OverviewContent(
             viewModel, video,
             onFullscreen = onFullscreen, onPip = onPip, showAudioMode = showAudioMode
         )
-        Tab.SETTINGS -> SettingsScreen(viewModel, onViewLogs = onViewLogs)
+        Tab.SETTINGS -> SettingsScreen(
+            viewModel,
+            onViewLogs = onViewLogs,
+            onNavigateToOverview = onNavigateToOverview
+        )
     }
 }
 

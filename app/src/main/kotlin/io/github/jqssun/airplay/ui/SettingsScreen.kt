@@ -18,6 +18,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
@@ -37,7 +42,8 @@ import kotlin.math.roundToInt
 @Composable
 fun SettingsScreen(
     viewModel: MainViewModel,
-    onViewLogs: () -> Unit = {}
+    onViewLogs: () -> Unit = {},
+    onNavigateToOverview: () -> Unit = {}
 ) {
     val logsEnabled by viewModel.logsEnabled.collectAsState()
     val serverName by viewModel.serverName.collectAsState()
@@ -80,6 +86,16 @@ fun SettingsScreen(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(vertical = 8.dp)
+            .onKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.DirectionLeft || event.key == Key.DirectionRight)
+                ) {
+                    onNavigateToOverview()
+                    true
+                } else {
+                    false
+                }
+            }
     ) {
         SectionHeader(stringResource(R.string.section_server))
 

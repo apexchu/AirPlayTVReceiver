@@ -19,7 +19,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -140,13 +144,18 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             AirPlayTheme {
-                MainScreen(
-                    viewModel = viewModel,
-                    isInPip = isInPip.value,
-                    onSurfaceAvailable = { viewModel.onSurfaceAvailable(it) },
-                    onSurfaceDestroyed = { viewModel.onSurfaceDestroyed(it) },
-                    onPip = { enterPip() }
-                )
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    MainScreen(
+                        viewModel = viewModel,
+                        isInPip = isInPip.value,
+                        onSurfaceAvailable = { viewModel.onSurfaceAvailable(it) },
+                        onSurfaceDestroyed = { viewModel.onSurfaceDestroyed(it) },
+                        onPip = { enterPip() }
+                    )
+                }
             }
         }
     }
