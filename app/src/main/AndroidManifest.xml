@@ -53,10 +53,6 @@
             android:foregroundServiceType="connectedDevice|mediaPlayback"
             android:exported="false" />
 
-        <service
-            android:name=".dlna.AirPlayUpnpService"
-            android:exported="false" />
-
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"

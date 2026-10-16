@@ -1,58 +1,111 @@
 package io.github.jqssun.airplay.dlna
 
-import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
-import android.content.ServiceConnection
 import android.content.SharedPreferences
-import android.os.IBinder
 import android.util.Log
 import io.github.jqssun.airplay.Prefs
-import org.fourthline.cling.android.AndroidUpnpService
-import org.fourthline.cling.android.AndroidUpnpServiceImpl
+import org.fourthline.cling.UpnpService
+import org.fourthline.cling.UpnpServiceImpl
+import org.fourthline.cling.android.AndroidRouter
+import org.fourthline.cling.android.AndroidUpnpServiceConfiguration
 import org.fourthline.cling.binding.annotations.AnnotationLocalServiceBinder
 import org.fourthline.cling.model.DefaultServiceManager
 import org.fourthline.cling.model.meta.*
+import org.fourthline.cling.model.types.ServiceType
 import org.fourthline.cling.model.types.UDADeviceType
 import org.fourthline.cling.model.types.UDN
+import org.fourthline.cling.protocol.ProtocolFactory
+import org.fourthline.cling.registry.Registry
 import org.fourthline.cling.support.connectionmanager.ConnectionManagerService
+import org.fourthline.cling.transport.Router
+import org.fourthline.cling.transport.impl.jetty.JettyServletContainer
 import java.util.UUID
 
 class DlnaUpnpManager(
     private val context: Context,
     private val callback: CustomAVTransportService.DlnaPlaybackCallback
 ) {
-    private var upnpService: AndroidUpnpService? = null
+    private var upnpService: UpnpService? = null
     private var localDevice: LocalDevice? = null
-    private var isBound = false
     private val prefs: SharedPreferences by lazy {
         context.getSharedPreferences(Prefs.NAME, Context.MODE_PRIVATE)
     }
 
-    private val serviceConnection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-            Log.i(TAG, "AndroidUpnpService connected")
-            upnpService = service as? AndroidUpnpService
-            registerMediaRenderer()
+    @Synchronized
+    fun start(nameOverride: String? = null) {
+        if (upnpService != null) {
+            nameOverride?.let { updateDeviceName(it) }
+            return
         }
-
-        override fun onServiceDisconnected(name: ComponentName?) {
-            Log.i(TAG, "AndroidUpnpService disconnected")
-            upnpService = null
+        Log.i(TAG, "Starting DLNA UPnP service...")
+        resetJettyContainer()
+        try {
+            val configuration = object : AndroidUpnpServiceConfiguration() {
+                override fun getExclusiveServiceTypes(): Array<ServiceType>? {
+                    return null
+                }
+            }
+            val service = object : UpnpServiceImpl(configuration) {
+                override fun createRouter(protocolFactory: ProtocolFactory, registry: Registry): Router {
+                    return AndroidRouter(configuration, protocolFactory, context)
+                }
+            }
+            upnpService = service
+            registerMediaRenderer(nameOverride)
+            Log.i(TAG, "DLNA UPnP service started successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start DLNA UPnP service", e)
         }
     }
 
-    fun start() {
-        if (isBound) return
-        val intent = Intent(context, AirPlayUpnpService::class.java)
-        isBound = context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
-        Log.i(TAG, "Binding to AirPlayUpnpService, bound=$isBound")
+    private inline fun <T> withPermitNetwork(block: () -> T): T {
+        val oldPolicy = android.os.StrictMode.getThreadPolicy()
+        return try {
+            android.os.StrictMode.setThreadPolicy(
+                android.os.StrictMode.ThreadPolicy.Builder(oldPolicy).permitNetwork().build()
+            )
+            block()
+        } finally {
+            android.os.StrictMode.setThreadPolicy(oldPolicy)
+        }
     }
 
+    @Synchronized
+    fun stop() {
+        Log.i(TAG, "Stopping DLNA UPnP service...")
+        unregisterMediaRenderer()
+        try {
+            withPermitNetwork {
+                upnpService?.shutdown()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error shutting down UPnP service", e)
+        }
+        upnpService = null
+        resetJettyContainer()
+        Log.i(TAG, "DLNA UPnP service stopped")
+    }
+
+    @Synchronized
     fun updateDeviceName(newName: String) {
         if (localDevice?.details?.friendlyName == newName) return
         unregisterMediaRenderer()
         registerMediaRenderer(newName)
+    }
+
+    private fun resetJettyContainer() {
+        try {
+            JettyServletContainer.INSTANCE.stopIfRunning()
+        } catch (e: Throwable) {
+            Log.w(TAG, "Error stopping Jetty container", e)
+        }
+        try {
+            val method = JettyServletContainer::class.java.getDeclaredMethod("resetServer")
+            method.isAccessible = true
+            method.invoke(JettyServletContainer.INSTANCE)
+        } catch (e: Throwable) {
+            Log.w(TAG, "Error resetting Jetty server", e)
+        }
     }
 
     private fun registerMediaRenderer(nameOverride: String? = null) {
@@ -60,7 +113,9 @@ class DlnaUpnpManager(
         try {
             val device = createMediaRendererDevice(nameOverride)
             localDevice = device
-            service.registry.addDevice(device)
+            withPermitNetwork {
+                service.registry.addDevice(device)
+            }
             Log.i(TAG, "Registered DLNA MediaRenderer: ${device.details.friendlyName} (UDN: ${device.identity.udn})")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to register DLNA MediaRenderer", e)
@@ -70,7 +125,9 @@ class DlnaUpnpManager(
     private fun unregisterMediaRenderer() {
         localDevice?.let {
             try {
-                upnpService?.registry?.removeDevice(it)
+                withPermitNetwork {
+                    upnpService?.registry?.removeDevice(it)
+                }
                 Log.i(TAG, "Unregistered DLNA MediaRenderer: ${it.details.friendlyName}")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to unregister DLNA MediaRenderer", e)
@@ -131,19 +188,6 @@ class DlnaUpnpManager(
             deviceDetails,
             arrayOf(avTransportService, renderingControlService, connectionManagerService)
         )
-    }
-
-    fun stop() {
-        unregisterMediaRenderer()
-        if (isBound) {
-            try {
-                context.unbindService(serviceConnection)
-            } catch (e: Exception) {
-                Log.w(TAG, "Error unbinding AndroidUpnpServiceImpl", e)
-            }
-            isBound = false
-        }
-        upnpService = null
     }
 
     companion object {

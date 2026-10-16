@@ -538,7 +538,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
             ContextCompat.startForegroundService(this, Intent(this, AirPlayService::class.java))
         }
         promoteToForeground()
-        dlnaManager = DlnaUpnpManager(this, dlnaCallback).apply { start() }
+        dlnaManager = DlnaUpnpManager(this, dlnaCallback).apply { start(resolvedName) }
         log("Server started on port $port")
     }
 
