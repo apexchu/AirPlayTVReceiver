@@ -27,6 +27,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
@@ -616,18 +617,50 @@ private fun SettingResolution(
     val allKeys = remember {
         listOf(Prefs.AUTO, "1280x720", "1920x1080", "3840x2160", "custom", "portrait", "landscape")
     }
-    val optionRequesters = remember { allKeys.associateWith { FocusRequester() } }
-    val itemFocusRequester = remember { FocusRequester() }
+    val optionRequesters = remember(allKeys) { allKeys.associateWith { FocusRequester() } }
 
-    val coroutineScope = rememberCoroutineScope()
     val activeKey = if (presets.any { it.first == value }) value
         else if (devicePresets.any { it.first == value }) value
         else "custom"
 
-    fun focusActiveOption() {
-        coroutineScope.launch {
-            runCatching { optionRequesters[activeKey]?.requestFocus() }
+    fun onChipKey(index: Int, event: KeyEvent): Boolean {
+        if (event.type == KeyEventType.KeyDown) {
+            when (event.key) {
+                Key.DirectionRight -> {
+                    if (index < allKeys.lastIndex) {
+                        val nextKey = allKeys[index + 1]
+                        optionRequesters[nextKey]?.requestFocus()
+                        if (nextKey == "custom") {
+                            editing = true
+                        } else {
+                            editing = false
+                            width = ""
+                            height = ""
+                            onValueChange(nextKey)
+                        }
+                    }
+                    return true
+                }
+                Key.DirectionLeft -> {
+                    if (index == 0) {
+                        onNavigateToOverview()
+                    } else {
+                        val prevKey = allKeys[index - 1]
+                        optionRequesters[prevKey]?.requestFocus()
+                        if (prevKey == "custom") {
+                            editing = true
+                        } else {
+                            editing = false
+                            width = ""
+                            height = ""
+                            onValueChange(prevKey)
+                        }
+                    }
+                    return true
+                }
+            }
         }
+        return false
     }
 
     ListItem(
@@ -642,29 +675,22 @@ private fun SettingResolution(
                 Text(stringResource(R.string.setting_resolution_desc))
                 Spacer(Modifier.height(8.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    @Composable
-                    fun presetChip(key: String, label: String, isFirstInRow: Boolean = false) = FilterChip(
-                        selected = value == key && !editing,
-                        onClick = {
-                            editing = false
-                            width = ""; height = ""
-                            onValueChange(key)
-                        },
-                        label = { Text(label) },
-                        modifier = Modifier
-                            .thenIf(optionRequesters.containsKey(key)) {
-                                focusRequester(optionRequesters[key]!!)
-                            }
-                            .dpadFocus()
-                            .onPreviewKeyEvent { event ->
-                                if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft && isFirstInRow) {
-                                    onNavigateToOverview()
-                                    true
-                                } else false
-                            }
-                    )
                     presets.forEachIndexed { index, (key, label) ->
-                        presetChip(key, label, isFirstInRow = index == 0)
+                        FilterChip(
+                            selected = value == key && !editing,
+                            onClick = {
+                                editing = false
+                                width = ""; height = ""
+                                onValueChange(key)
+                            },
+                            label = { Text(label) },
+                            modifier = Modifier
+                                .thenIf(optionRequesters.containsKey(key)) {
+                                    focusRequester(optionRequesters[key]!!)
+                                }
+                                .dpadFocus()
+                                .onPreviewKeyEvent { event -> onChipKey(index, event) }
+                        )
                     }
                     FilterChip(
                         selected = !isPreset || editing,
@@ -675,9 +701,25 @@ private fun SettingResolution(
                                 focusRequester(optionRequesters["custom"]!!)
                             }
                             .dpadFocus()
+                            .onPreviewKeyEvent { event -> onChipKey(presets.size, event) }
                     )
-                    devicePresets.forEach { (key, label) ->
-                        presetChip(key, label)
+                    devicePresets.forEachIndexed { i, (key, label) ->
+                        val index = presets.size + 1 + i
+                        FilterChip(
+                            selected = value == key && !editing,
+                            onClick = {
+                                editing = false
+                                width = ""; height = ""
+                                onValueChange(key)
+                            },
+                            label = { Text(label) },
+                            modifier = Modifier
+                                .thenIf(optionRequesters.containsKey(key)) {
+                                    focusRequester(optionRequesters[key]!!)
+                                }
+                                .dpadFocus()
+                                .onPreviewKeyEvent { event -> onChipKey(index, event) }
+                        )
                     }
                 }
                 if (editing || !isPreset) {
@@ -816,17 +858,46 @@ private fun SettingChipField(
     var editing by remember { mutableStateOf(false) }
     var text by remember(value) { mutableStateOf(if (isPreset) "" else value) }
 
-    val coroutineScope = rememberCoroutineScope()
     val allKeys = remember(presets) { presets.map { it.first } + "custom" }
     val optionRequesters = remember(allKeys) { allKeys.associateWith { FocusRequester() } }
-    val itemFocusRequester = remember { FocusRequester() }
-
     val activeKey = if (presets.any { it.first == value }) value else "custom"
 
-    fun focusActiveOption() {
-        coroutineScope.launch {
-            runCatching { optionRequesters[activeKey]?.requestFocus() }
+    fun onChipKey(index: Int, event: KeyEvent): Boolean {
+        if (event.type == KeyEventType.KeyDown) {
+            when (event.key) {
+                Key.DirectionRight -> {
+                    if (index < allKeys.lastIndex) {
+                        val nextKey = allKeys[index + 1]
+                        optionRequesters[nextKey]?.requestFocus()
+                        if (nextKey == "custom") {
+                            editing = true
+                        } else {
+                            editing = false
+                            text = ""
+                            onValueChange(nextKey)
+                        }
+                    }
+                    return true
+                }
+                Key.DirectionLeft -> {
+                    if (index == 0) {
+                        onNavigateToOverview()
+                    } else {
+                        val prevKey = allKeys[index - 1]
+                        optionRequesters[prevKey]?.requestFocus()
+                        if (prevKey == "custom") {
+                            editing = true
+                        } else {
+                            editing = false
+                            text = ""
+                            onValueChange(prevKey)
+                        }
+                    }
+                    return true
+                }
+            }
         }
+        return false
     }
 
     ListItem(
@@ -840,26 +911,36 @@ private fun SettingChipField(
             Column {
                 Text(description)
                 Spacer(Modifier.height(8.dp))
-                ChipRow(
-                    value = if (editing) "" else value,
-                    options = presets,
-                    onSelect = { editing = false; text = ""; onValueChange(it) },
-                    optionRequesters = optionRequesters,
-                    itemFocusRequester = itemFocusRequester,
-                    onNavigateToOverview = onNavigateToOverview,
-                    trailing = {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    presets.forEachIndexed { index, (key, label) ->
                         FilterChip(
-                            selected = !isPreset || editing,
-                            onClick = { editing = true },
-                            label = { Text(stringResource(R.string.chip_custom)) },
+                            selected = value == key && !editing,
+                            onClick = {
+                                editing = false
+                                text = ""
+                                onValueChange(key)
+                            },
+                            label = { Text(label) },
                             modifier = Modifier
-                                .thenIf(optionRequesters.containsKey("custom")) {
-                                    focusRequester(optionRequesters["custom"]!!)
+                                .thenIf(optionRequesters.containsKey(key)) {
+                                    focusRequester(optionRequesters[key]!!)
                                 }
                                 .dpadFocus()
+                                .onPreviewKeyEvent { event -> onChipKey(index, event) }
                         )
                     }
-                )
+                    FilterChip(
+                        selected = !isPreset || editing,
+                        onClick = { editing = true },
+                        label = { Text(stringResource(R.string.chip_custom)) },
+                        modifier = Modifier
+                            .thenIf(optionRequesters.containsKey("custom")) {
+                                focusRequester(optionRequesters["custom"]!!)
+                            }
+                            .dpadFocus()
+                            .onPreviewKeyEvent { event -> onChipKey(presets.size, event) }
+                    )
+                }
                 if (editing || !isPreset) {
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
@@ -885,40 +966,6 @@ private fun SettingChipField(
     )
 }
 
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun ChipRow(
-    value: String,
-    options: List<Pair<String, String>>,
-    onSelect: (String) -> Unit,
-    optionRequesters: Map<String, FocusRequester> = emptyMap(),
-    itemFocusRequester: FocusRequester? = null,
-    onNavigateToOverview: () -> Unit = {},
-    trailing: @Composable () -> Unit = {}
-) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        options.forEachIndexed { index, (key, label) ->
-            FilterChip(
-                selected = value == key,
-                onClick = { onSelect(key) },
-                label = { Text(label) },
-                modifier = Modifier
-                    .thenIf(optionRequesters.containsKey(key)) {
-                        focusRequester(optionRequesters[key]!!)
-                    }
-                    .dpadFocus()
-                    .onPreviewKeyEvent { event ->
-                        if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionLeft && index == 0) {
-                            onNavigateToOverview()
-                            true
-                        } else false
-                    }
-            )
-        }
-        trailing()
-    }
-}
-
 @Composable
 private fun SettingChips(
     title: String,
@@ -929,15 +976,34 @@ private fun SettingChips(
     modifier: Modifier = Modifier,
     onNavigateToOverview: () -> Unit = {}
 ) {
-    val coroutineScope = rememberCoroutineScope()
-    val optionRequesters = remember(options) { options.map { it.first }.associateWith { FocusRequester() } }
-    val itemFocusRequester = remember { FocusRequester() }
+    val allKeys = remember(options) { options.map { it.first } }
+    val optionRequesters = remember(allKeys) { allKeys.associateWith { FocusRequester() } }
     val activeKey = if (options.any { it.first == value }) value else options.first().first
 
-    fun focusActiveOption() {
-        coroutineScope.launch {
-            runCatching { optionRequesters[activeKey]?.requestFocus() }
+    fun onChipKey(index: Int, event: KeyEvent): Boolean {
+        if (event.type == KeyEventType.KeyDown) {
+            when (event.key) {
+                Key.DirectionRight -> {
+                    if (index < allKeys.lastIndex) {
+                        val nextKey = allKeys[index + 1]
+                        optionRequesters[nextKey]?.requestFocus()
+                        onValueChange(nextKey)
+                    }
+                    return true
+                }
+                Key.DirectionLeft -> {
+                    if (index == 0) {
+                        onNavigateToOverview()
+                    } else {
+                        val prevKey = allKeys[index - 1]
+                        optionRequesters[prevKey]?.requestFocus()
+                        onValueChange(prevKey)
+                    }
+                    return true
+                }
+            }
         }
+        return false
     }
 
     ListItem(
@@ -951,14 +1017,21 @@ private fun SettingChips(
             Column {
                 Text(description)
                 Spacer(Modifier.height(8.dp))
-                ChipRow(
-                    value = value,
-                    options = options,
-                    onSelect = onValueChange,
-                    optionRequesters = optionRequesters,
-                    itemFocusRequester = itemFocusRequester,
-                    onNavigateToOverview = onNavigateToOverview
-                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    options.forEachIndexed { index, (key, label) ->
+                        FilterChip(
+                            selected = value == key,
+                            onClick = { onValueChange(key) },
+                            label = { Text(label) },
+                            modifier = Modifier
+                                .thenIf(optionRequesters.containsKey(key)) {
+                                    focusRequester(optionRequesters[key]!!)
+                                }
+                                .dpadFocus()
+                                .onPreviewKeyEvent { event -> onChipKey(index, event) }
+                        )
+                    }
+                }
             }
         }
     )
