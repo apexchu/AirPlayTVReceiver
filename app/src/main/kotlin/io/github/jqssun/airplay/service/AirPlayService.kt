@@ -145,9 +145,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
     // recent /playback-info polls with no playback = pending video; polls start ~1s before /play
     @Volatile private var _lastVideoPollAt = 0L
     @Volatile private var _videoPollSuppressed = false
-    @Volatile private var _isDlnaPlayback = false
     @Volatile private var _lastDlnaHeartbeatAt = 0L
-    private var _playbackHeartbeatJob: Job? = null
 
     fun videoSessionPending(): Boolean =
         !_videoPlaybackActive.value && !_audioOnly.value && !_mirroringActive.value &&
@@ -613,9 +611,6 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         videoRenderer.release()
         airPlayVideoPlayer.stop()
         mediaSession?.isActive = false
-        _playbackHeartbeatJob?.cancel()
-        _playbackHeartbeatJob = null
-        _isDlnaPlayback = false
         _audioOnly.value = false
         _videoPlaybackActive.value = false
         _mirroringActive.value = false
@@ -679,7 +674,6 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
 
     fun playDlnaVideo(uri: String, title: String? = null, startPositionSeconds: Float = 0f) {
         if (shouldLaunchOnConnect()) launchMainActivity()
-        _isDlnaPlayback = true
         _lastDlnaHeartbeatAt = SystemClock.elapsedRealtime()
         _videoLocation.value = uri
         _videoPlaySeq.value++
@@ -691,7 +685,6 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         _videoPlaybackActive.value = true
         airPlayVideoPlayer.play(uri, startPositionSeconds)
         mediaSession?.isActive = true
-        _startPlaybackHeartbeatMonitor()
         log("DLNA Video play: $uri ($title)")
     }
 
@@ -701,38 +694,12 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
 
     private fun _endVideoPlayback(message: String) {
         if (!_videoPlaybackActive.value) return
-        _playbackHeartbeatJob?.cancel()
-        _playbackHeartbeatJob = null
-        _isDlnaPlayback = false
         // lingering polls after a stop must not bounce the UI back to a pending session
         _videoPollSuppressed = true
         _videoPlaybackActive.value = false
         airPlayVideoPlayer.stop()
         if (!_audioOnly.value) mediaSession?.isActive = false
         log(message)
-    }
-
-    private fun _startPlaybackHeartbeatMonitor() {
-        _playbackHeartbeatJob?.cancel()
-        _playbackHeartbeatJob = lifecycleScope.launch {
-            while (isActive && _videoPlaybackActive.value) {
-                delay(1000L)
-                val now = SystemClock.elapsedRealtime()
-                if (_isDlnaPlayback) {
-                    if (_lastDlnaHeartbeatAt > 0L && now - _lastDlnaHeartbeatAt > DLNA_HEARTBEAT_TIMEOUT_MS) {
-                        log("DLNA client heartbeat timeout (${now - _lastDlnaHeartbeatAt}ms), client app closed -> stopping projection")
-                        _mainHandler.post { stopVideoPlayback() }
-                        break
-                    }
-                } else {
-                    if (_lastVideoPollAt > 0L && now - _lastVideoPollAt > AIRPLAY_POLL_TIMEOUT_MS) {
-                        log("AirPlay video poll timeout (${now - _lastVideoPollAt}ms), client app closed -> stopping projection")
-                        _mainHandler.post { stopVideoPlayback() }
-                        break
-                    }
-                }
-            }
-        }
     }
 
     override fun onDestroy() {
@@ -766,7 +733,6 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
 
     override fun onVideoPlay(location: String, startPositionSeconds: Float) {
         if (shouldLaunchOnConnect()) launchMainActivity()
-        _isDlnaPlayback = false
         _lastVideoPollAt = SystemClock.elapsedRealtime()
         _videoLocation.value = location
         _videoPlaySeq.value++
@@ -779,7 +745,6 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         airPlayVideoPlayer.play(location, startPositionSeconds)
         // claim media-button routing for keys that arrive as media-session events
         mediaSession?.isActive = true
-        _startPlaybackHeartbeatMonitor()
         log("AirPlay Video play: $location @ ${startPositionSeconds}s")
     }
 
@@ -1377,8 +1342,6 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         // shared with dpad/double-tap seeks
         const val VIDEO_SEEK_STEP_MS = 10_000L
         const val VIDEO_POLL_PENDING_TIMEOUT_MS = 3_000L
-        const val DLNA_HEARTBEAT_TIMEOUT_MS = 10_000L
-        const val AIRPLAY_POLL_TIMEOUT_MS = 8_000L
 
         private const val AUDIO_CONFIG_DEBOUNCE_MS = 500L
     }

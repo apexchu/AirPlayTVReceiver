@@ -44,9 +44,9 @@ class DlnaUpnpManager(
 
     fun start() {
         if (isBound) return
-        val intent = Intent(context, AndroidUpnpServiceImpl::class.java)
+        val intent = Intent(context, AirPlayUpnpService::class.java)
         isBound = context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
-        Log.i(TAG, "Binding to AndroidUpnpServiceImpl, bound=$isBound")
+        Log.i(TAG, "Binding to AirPlayUpnpService, bound=$isBound")
     }
 
     fun updateDeviceName(newName: String) {

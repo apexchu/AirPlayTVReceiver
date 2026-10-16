@@ -54,7 +54,7 @@
             android:exported="false" />
 
         <service
-            android:name="org.fourthline.cling.android.AndroidUpnpServiceImpl"
+            android:name=".dlna.AirPlayUpnpService"
             android:exported="false" />
 
         <receiver
