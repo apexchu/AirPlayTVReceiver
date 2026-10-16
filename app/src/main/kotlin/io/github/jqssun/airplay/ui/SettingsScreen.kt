@@ -80,6 +80,8 @@ fun SettingsScreen(
     val audioCushionMs by viewModel.audioCushionMs.collectAsState()
     val audioAdaptiveStep by viewModel.audioAdaptiveStep.collectAsState()
     val oboeBufferFrames by viewModel.oboeBufferFrames.collectAsState()
+    val customDnsEnabled by viewModel.customDnsEnabled.collectAsState()
+    val customDnsServers by viewModel.customDnsServers.collectAsState()
 
     Column(
         modifier = Modifier
@@ -141,6 +143,21 @@ fun SettingsScreen(
             checked = allowNewConn,
             onCheckedChange = { viewModel.setAllowNewConn(it) }
         )
+
+        SettingSwitch(
+            title = stringResource(R.string.setting_custom_dns),
+            description = stringResource(R.string.setting_custom_dns_desc),
+            checked = customDnsEnabled,
+            onCheckedChange = { viewModel.setCustomDnsEnabled(it) }
+        )
+
+        if (customDnsEnabled) {
+            SettingTextField(
+                label = stringResource(R.string.setting_custom_dns_servers),
+                value = customDnsServers,
+                onCommit = { viewModel.setCustomDnsServers(it) }
+            )
+        }
 
         val ctx = LocalContext.current
         val lifecycleOwner = LocalLifecycleOwner.current

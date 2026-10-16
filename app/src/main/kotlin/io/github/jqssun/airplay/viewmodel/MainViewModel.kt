@@ -189,6 +189,12 @@ class MainViewModel @Inject constructor(app: Application) : AndroidViewModel(app
     private val _launchOnConnect = MutableStateFlow(prefs.getBoolean(Prefs.LAUNCH_ON_CONNECT, Prefs.DEF_LAUNCH_ON_CONNECT))
     val launchOnConnect: StateFlow<Boolean> = _launchOnConnect.asStateFlow()
 
+    private val _customDnsEnabled = MutableStateFlow(prefs.getBoolean(Prefs.CUSTOM_DNS_ENABLED, Prefs.DEF_CUSTOM_DNS_ENABLED))
+    val customDnsEnabled: StateFlow<Boolean> = _customDnsEnabled.asStateFlow()
+
+    private val _customDnsServers = MutableStateFlow(prefs.getString(Prefs.CUSTOM_DNS_SERVERS, Prefs.DEF_CUSTOM_DNS_SERVERS) ?: Prefs.DEF_CUSTOM_DNS_SERVERS)
+    val customDnsServers: StateFlow<String> = _customDnsServers.asStateFlow()
+
     // debug
     private val _debugEnabled = MutableStateFlow(prefs.getBoolean(Prefs.DEBUG_ENABLED, Prefs.DEF_DEBUG_ENABLED))
     val debugEnabled: StateFlow<Boolean> = _debugEnabled.asStateFlow()
@@ -422,6 +428,14 @@ class MainViewModel @Inject constructor(app: Application) : AndroidViewModel(app
     fun setAdvertiseVideo(v: Boolean) { _advertiseVideo.value = v; prefs.edit().putBoolean(Prefs.ADVERTISE_VIDEO, v).apply(); _applyByServerRestart() }
     fun setAdvertiseAudio(v: Boolean) { _advertiseAudio.value = v; prefs.edit().putBoolean(Prefs.ADVERTISE_AUDIO, v).apply(); _applyByServerRestart() }
     fun setLaunchOnConnect(v: Boolean) { _launchOnConnect.value = v; prefs.edit().putBoolean(Prefs.LAUNCH_ON_CONNECT, v).apply() }
+    fun setCustomDnsEnabled(v: Boolean) {
+        _customDnsEnabled.value = v
+        prefs.edit().putBoolean(Prefs.CUSTOM_DNS_ENABLED, v).apply()
+    }
+    fun setCustomDnsServers(v: String) {
+        _customDnsServers.value = v
+        prefs.edit().putString(Prefs.CUSTOM_DNS_SERVERS, v).apply()
+    }
     fun setDebugEnabled(v: Boolean) { _debugEnabled.value = v; prefs.edit().putBoolean(Prefs.DEBUG_ENABLED, v).apply() }
     fun setDeveloperOptions(v: Boolean) {
         _developerOptions.value = v

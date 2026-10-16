@@ -12,7 +12,13 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.VideoSize
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import io.github.jqssun.airplay.net.CustomDns
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 
 // rate is 0 while buffering; speed is the configured rate regardless of pause state
 // native reads the effective rate, overlay reads playWhenReady + speed + skipSilence
@@ -68,14 +74,32 @@ class AirPlayVideoPlayer(private val context: Context) {
         }
     }
 
+    private val customDns = CustomDns(context)
+    private val okHttpClient by lazy {
+        OkHttpClient.Builder()
+            .dns(customDns)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .build()
+    }
+
+    private fun createMediaSourceFactory(): DefaultMediaSourceFactory {
+        val okHttpDataSourceFactory = OkHttpDataSource.Factory(okHttpClient)
+        val defaultDataSourceFactory = DefaultDataSource.Factory(context, okHttpDataSourceFactory)
+        return DefaultMediaSourceFactory(defaultDataSourceFactory)
+    }
+
     fun play(location: String, startPositionSeconds: Float) = mainHandler.post {
         // recycling must not report the stopped sentinel: senders poll right after /play
         _stopInternal(reportStopped = false)
-        val p = ExoPlayer.Builder(context).build().also {
-            it.setWakeMode(C.WAKE_MODE_NETWORK)
-            it.addListener(_listener)
-            pendingSurface?.let { s -> it.setVideoSurface(s) }
-        }
+        val p = ExoPlayer.Builder(context)
+            .setMediaSourceFactory(createMediaSourceFactory())
+            .build()
+            .also {
+                it.setWakeMode(C.WAKE_MODE_NETWORK)
+                it.addListener(_listener)
+                pendingSurface?.let { s -> it.setVideoSurface(s) }
+            }
         player = p
         p.setMediaItem(MediaItem.fromUri(location), (startPositionSeconds * 1000).toLong())
         p.playWhenReady = true

@@ -102,6 +102,9 @@
     <string name="setting_require_pin_desc">Require 4-digit PIN for each new connection</string>
     <string name="setting_allow_new_conn">Allow new connections</string>
     <string name="setting_allow_new_conn_desc">Drop current client when a new one connects</string>
+    <string name="setting_custom_dns">自定义 DNS (Custom DNS)</string>
+    <string name="setting_custom_dns_desc">默认使用自定义 DNS 解析投屏流媒体 URI，关闭时使用系统默认网络 DNS</string>
+    <string name="setting_custom_dns_servers">自定义 DNS 服务器 (多个用逗号隔开)</string>
 
     <!-- Settings: Display -->
     <string name="setting_idle_preview">Idle screen preview</string>
