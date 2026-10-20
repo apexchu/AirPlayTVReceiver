@@ -45,6 +45,7 @@ import io.github.jqssun.airplay.bridge.NativeBridge
 import io.github.jqssun.airplay.bridge.RaopCallbackHandler
 import io.github.jqssun.airplay.discovery.NsdServiceManager
 import io.github.jqssun.airplay.download.VideoDownloader
+import io.github.jqssun.airplay.playback.PlaybackHistoryManager
 import io.github.jqssun.airplay.renderer.AirPlayVideoPlayer
 import io.github.jqssun.airplay.renderer.AudioRenderer
 import io.github.jqssun.airplay.renderer.VideoRenderer
@@ -95,10 +96,23 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
     private val audioManager by lazy { getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val airPlayVideoPlayer by lazy { AirPlayVideoPlayer(this) }
     val videoDownloader by lazy { VideoDownloader(this) }
+    val playbackHistoryManager by lazy { PlaybackHistoryManager(this) }
+
+    private var _lastDiskSaveTimeMs = 0L
+    private var _currentVideoPositionMs = 0L
+    private var _currentVideoDurationMs = 0L
+    private var pendingDlnaStartPositionSeconds: Float = 0f
 
     private var dlnaManager: DlnaUpnpManager? = null
     private var currentDlnaUri: String? = null
     private var currentDlnaTitle: String? = null
+
+    private fun _flushPlaybackProgress() {
+        val uri = _videoLocation.value ?: return
+        if (_currentVideoPositionMs > 0L) {
+            playbackHistoryManager.saveProgress(uri, _currentVideoPositionMs, _currentVideoDurationMs)
+        }
+    }
 
     // hls urls point at the native httpd, valid only while the session lives
     private val _videoLocation = MutableStateFlow<String?>(null)
@@ -236,6 +250,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         override fun onSetUri(uri: String, title: String?) {
             currentDlnaUri = uri
             currentDlnaTitle = title
+            pendingDlnaStartPositionSeconds = 0f
             log("DLNA onSetUri: $uri ($title)")
         }
 
@@ -246,12 +261,13 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
                     videoRenderer.stopSession()
                     _mirroringActive.value = false
                 }
-                playDlnaVideo(uri, currentDlnaTitle)
+                playDlnaVideo(uri, currentDlnaTitle, pendingDlnaStartPositionSeconds)
             }
         }
 
         override fun onPause() {
             _mainHandler.post {
+                _flushPlaybackProgress()
                 airPlayVideoPlayer.setRate(0f)
             }
         }
@@ -264,7 +280,13 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
 
         override fun onSeek(positionMs: Long) {
             _mainHandler.post {
-                airPlayVideoPlayer.scrub(positionMs / 1000f)
+                if (!_videoPlaybackActive.value) {
+                    pendingDlnaStartPositionSeconds = positionMs / 1000f
+                } else {
+                    airPlayVideoPlayer.scrub(positionMs / 1000f)
+                    _currentVideoPositionMs = positionMs
+                    _flushPlaybackProgress()
+                }
             }
         }
 
@@ -403,8 +425,12 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
             _videoPlaybackAspect.value = aspect
             _videoPlaybackSize.value = width to height
         }
-        airPlayVideoPlayer.onTitle = { _videoTitle.value = it ?: "" }
-        airPlayVideoPlayer.onEnded = { _endVideoPlayback("AirPlay Video stopped (player)") }
+        airPlayVideoPlayer.onEnded = { isFinished ->
+            _endVideoPlayback(
+                if (isFinished) "AirPlay Video stopped (finished)" else "AirPlay Video stopped (error)",
+                isFinished = isFinished
+            )
+        }
         airPlayVideoPlayer.onPlaybackInfo = { snapshot ->
             if (nativeHandle != 0L) {
                 NativeBridge.nativeUpdatePlaybackInfo(nativeHandle, snapshot.position, snapshot.duration, snapshot.rate, snapshot.ready)
@@ -419,6 +445,20 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
                     skipSilence = snapshot.skipSilence,
                     buffering = snapshot.buffering,
                 )
+
+                val uri = _videoLocation.value
+                if (!uri.isNullOrBlank() && !snapshot.isLive) {
+                    val posMs = (snapshot.position * 1000f).toLong()
+                    val durMs = if (snapshot.duration > 0f) (snapshot.duration * 1000f).toLong() else 0L
+                    _currentVideoPositionMs = posMs
+                    _currentVideoDurationMs = durMs
+
+                    val now = SystemClock.elapsedRealtime()
+                    if (snapshot.playWhenReady && now - _lastDiskSaveTimeMs >= 5000L) {
+                        _lastDiskSaveTimeMs = now
+                        playbackHistoryManager.saveProgress(uri, posMs, durMs)
+                    }
+                }
             }
         }
         lifecycleScope.launch {
@@ -654,10 +694,15 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
 
     fun setVideoPlaying(playing: Boolean) {
         airPlayVideoPlayer.setPlaying(playing)
+        if (!playing) {
+            _flushPlaybackProgress()
+        }
     }
 
     fun seekVideoTo(positionMs: Long) {
         airPlayVideoPlayer.scrub(positionMs / 1000f)
+        _currentVideoPositionMs = positionMs
+        _flushPlaybackProgress()
     }
 
     fun setVideoScrubbing(enabled: Boolean) {
@@ -684,22 +729,45 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         _videoLocation.value = uri
         _videoPlaySeq.value++
         _videoPollSuppressed = false
-        _videoPlaybackInfo.value = VideoPlaybackInfo(positionMs = (startPositionSeconds * 1000).toLong())
+
+        val savedMs = playbackHistoryManager.getProgressMs(uri)
+        val castMs = (startPositionSeconds * 1000f).toLong()
+        val effectiveStartSeconds = if (savedMs != null && savedMs > castMs) {
+            log("DLNA Video: using saved progress ${savedMs / 1000f}s (cast: ${startPositionSeconds}s)")
+            savedMs / 1000f
+        } else {
+            log("DLNA Video: using cast progress ${startPositionSeconds}s (saved: ${savedMs?.let { it / 1000f } ?: "none"})")
+            startPositionSeconds
+        }
+
+        _currentVideoPositionMs = (effectiveStartSeconds * 1000f).toLong()
+        _currentVideoDurationMs = 0L
+        _lastDiskSaveTimeMs = SystemClock.elapsedRealtime()
+
+        _videoPlaybackInfo.value = VideoPlaybackInfo(positionMs = _currentVideoPositionMs)
         _videoPlaybackAspect.value = 16f / 9f
         _videoPlaybackSize.value = null
         _videoTitle.value = title ?: "DLNA 投屏"
         _videoPlaybackActive.value = true
-        airPlayVideoPlayer.play(uri, startPositionSeconds)
+        airPlayVideoPlayer.play(uri, effectiveStartSeconds)
         mediaSession?.isActive = true
-        log("DLNA Video play: $uri ($title)")
+        log("DLNA Video play: $uri ($title) @ ${effectiveStartSeconds}s")
     }
 
     fun downloadVideo() {
         _videoLocation.value?.let { videoDownloader.start(it) }
     }
 
-    private fun _endVideoPlayback(message: String) {
+    private fun _endVideoPlayback(message: String, isFinished: Boolean = false) {
         if (!_videoPlaybackActive.value) return
+        val currentUri = _videoLocation.value
+        if (currentUri != null) {
+            if (isFinished) {
+                playbackHistoryManager.clearProgress(currentUri)
+            } else {
+                _flushPlaybackProgress()
+            }
+        }
         // lingering polls after a stop must not bounce the UI back to a pending session
         _videoPollSuppressed = true
         _videoPlaybackActive.value = false
@@ -709,6 +777,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
     }
 
     override fun onDestroy() {
+        _flushPlaybackProgress()
         stopServer()
         dacpPlayer.release()
         mediaReceiver?.let {
@@ -743,23 +812,43 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         _videoLocation.value = location
         _videoPlaySeq.value++
         _videoPollSuppressed = false
-        _videoPlaybackInfo.value = VideoPlaybackInfo(positionMs = (startPositionSeconds * 1000).toLong())
+
+        val savedMs = playbackHistoryManager.getProgressMs(location)
+        val castMs = (startPositionSeconds * 1000f).toLong()
+        val effectiveStartSeconds = if (savedMs != null && savedMs > castMs) {
+            log("AirPlay Video: using saved progress ${savedMs / 1000f}s (cast: ${startPositionSeconds}s)")
+            savedMs / 1000f
+        } else {
+            log("AirPlay Video: using cast progress ${startPositionSeconds}s (saved: ${savedMs?.let { it / 1000f } ?: "none"})")
+            startPositionSeconds
+        }
+
+        _currentVideoPositionMs = (effectiveStartSeconds * 1000f).toLong()
+        _currentVideoDurationMs = 0L
+        _lastDiskSaveTimeMs = SystemClock.elapsedRealtime()
+
+        _videoPlaybackInfo.value = VideoPlaybackInfo(positionMs = _currentVideoPositionMs)
         _videoPlaybackAspect.value = 16f / 9f
         _videoPlaybackSize.value = null
         _videoTitle.value = ""
         _videoPlaybackActive.value = true
-        airPlayVideoPlayer.play(location, startPositionSeconds)
+        airPlayVideoPlayer.play(location, effectiveStartSeconds)
         // claim media-button routing for keys that arrive as media-session events
         mediaSession?.isActive = true
-        log("AirPlay Video play: $location @ ${startPositionSeconds}s")
+        log("AirPlay Video play: $location @ ${effectiveStartSeconds}s")
     }
 
     override fun onVideoScrub(positionSeconds: Float) {
         airPlayVideoPlayer.scrub(positionSeconds)
+        _currentVideoPositionMs = (positionSeconds * 1000f).toLong()
+        _flushPlaybackProgress()
     }
 
     override fun onVideoRate(rate: Float) {
         airPlayVideoPlayer.setRate(rate)
+        if (rate <= 0f) {
+            _flushPlaybackProgress()
+        }
     }
 
     override fun onVideoStop() = _endVideoPlayback("AirPlay Video stopped")

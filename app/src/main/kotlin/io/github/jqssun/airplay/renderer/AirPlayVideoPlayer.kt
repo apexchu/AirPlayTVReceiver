@@ -31,6 +31,7 @@ data class PlaybackSnapshot(
     val speed: Float = 1f,
     val skipSilence: Boolean = false,
     val buffering: Boolean = false,
+    val isLive: Boolean = false,
 )
 
 // exoplayer calls stay on the main thread; native only reads the onPlaybackInfo snapshot
@@ -43,7 +44,7 @@ class AirPlayVideoPlayer(private val context: Context) {
     var onPlaybackInfo: ((PlaybackSnapshot) -> Unit)? = null
     var onVideoSize: ((width: Int, height: Int, aspect: Float) -> Unit)? = null
     var onTitle: ((String?) -> Unit)? = null
-    var onEnded: (() -> Unit)? = null
+    var onEnded: ((isFinished: Boolean) -> Unit)? = null
 
     private val _reportTick = object : Runnable {
         override fun run() {
@@ -55,10 +56,10 @@ class AirPlayVideoPlayer(private val context: Context) {
     private val _listener = object : Player.Listener {
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
             Log.w(TAG, "playback error", error)
-            onEnded?.invoke()
+            onEnded?.invoke(false)
         }
         override fun onPlaybackStateChanged(state: Int) {
-            if (state == Player.STATE_ENDED) onEnded?.invoke()
+            if (state == Player.STATE_ENDED) onEnded?.invoke(true)
         }
         override fun onTimelineChanged(timeline: Timeline, reason: Int) {
             // duration is usually established here (esp. hls): report so the held /play releases
@@ -187,7 +188,8 @@ class AirPlayVideoPlayer(private val context: Context) {
         val duration = if (durationMs == C.TIME_UNSET) 0f else durationMs / 1000f
         val rate = if (p.playWhenReady && p.playbackState == Player.STATE_READY) p.playbackParameters.speed else 0f
         // readyToPlay = the timeline is established, NOT exoplayer's buffering state: for vod that means the duration is known; for live there is no duration so being playable is enough. the sender holds its timeline (and /play) until this, so it must not go true early
-        val ready = if (p.isCurrentMediaItemLive) p.playbackState == Player.STATE_READY
+        val isLive = p.isCurrentMediaItemLive
+        val ready = if (isLive) p.playbackState == Player.STATE_READY
                     else durationMs != C.TIME_UNSET
         onPlaybackInfo?.invoke(
             PlaybackSnapshot(
@@ -199,6 +201,7 @@ class AirPlayVideoPlayer(private val context: Context) {
                 speed = p.playbackParameters.speed,
                 skipSilence = p.skipSilenceEnabled,
                 buffering = p.playbackState == Player.STATE_BUFFERING,
+                isLive = isLive,
             )
         )
     }
